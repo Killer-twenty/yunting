@@ -70,6 +70,7 @@ fn port_busy(port: u16) -> bool {
 // ============================================================
 #[tauri::command]
 fn nodes_get() -> Vec<Value> {
+    diag("[cmd] nodes_get ← JS 调用到达（bridge 已就绪）");
     load_nodes()
 }
 

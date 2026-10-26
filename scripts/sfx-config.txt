@@ -1,8 +1,0 @@
-;!@Install@!UTF-8!
-Title="云亭"
-RunProgram="win-unpacked\\云亭.exe"
-ExtractTitle="云亭 · 首次解压"
-ExtractDialogText="正在解压云亭（仅首次运行需要）..."
-GUIFlags="4+8+64+256"
-Progress="yes"
-;!@InstallEnd@!

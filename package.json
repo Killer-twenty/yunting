@@ -6,7 +6,7 @@
   "description": "云亭 - Windows 桌面代理加速器 (Tauri 2.x + sing-box)",
   "author": "YG",
   "scripts": {
-    "test": "node --test app/test/parsers.test.js app/test/store.test.js app/test/configBuilder.test.js",
+    "test": "node --test ui/test/parsers.test.js ui/test/configBuilder.test.js",
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build"

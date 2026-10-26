@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"云亭主窗口权限：core 默认命令 + shell 事件监听","local":true,"windows":["main"],"permissions":["core:default"]}}

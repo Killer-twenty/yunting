@@ -13,7 +13,18 @@
   const { listen } = window.__TAURI__.event
 
   // ---- 加载纯函数模块（与旧版同一份文件）----
-  const parsers = __loadModule('lib/parsers.js')
+  let parsers
+  try {
+    parsers = __loadModule('lib/parsers.js')
+  } catch (e) {
+    console.error('[bridge] parsers.js 加载失败:', e)
+    document.title = '云亭 (parsers 加载失败)'
+    throw e
+  }
+  if (!parsers || typeof parsers.parseShareLink !== 'function') {
+    document.title = '云亭 (parsers 接口异常)'
+    throw new Error('parsers 接口异常')
+  }
   // configBuilder 仅在需要时由 Rust 侧生成 config；前端不需要加载它
   // （configBuilder.js 的 require('./paths') 链在浏览器态可用，但 Rust 已实现等价逻辑）
 

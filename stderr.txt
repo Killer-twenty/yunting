@@ -1,4 +1,0 @@
-
-thread 'main' (8476) panicked at E:\cargo-home\registry\src\index.crates.io-1949cf8c6b5b557f\tauri-2.12.5\src\app.rs:1444:11:
-Failed to setup app: 拒绝访问。 (os error 5)
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
