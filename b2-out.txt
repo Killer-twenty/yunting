@@ -1,0 +1,8 @@
+MakeNSIS v3.13 - Copyright 1999-2026 Contributors
+See the file COPYING for license details.
+Credits can be found in the Users Manual.
+
+Processing config: C:\Users\Killer丶二十\AppData\Local\tauri\NSIS\nsisconf.nsh
+Processing script file: "E:\Agents\DSH_Projects\yt-tool-tauri\src-tauri\target\release\nsis\x64\installer.nsi" (UTF8)
+
+Note: you may have one or two (large) stale temporary file(s) left in your temporary directory (Generally this only happens on Windows 9x).
