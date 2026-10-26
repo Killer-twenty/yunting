@@ -179,13 +179,13 @@
         "type": "local",
         "tag": "geosite-cn",
         "format": "binary",
-        "path": "E:\\Agents\\DSH_Projects\\yt-tool-tauri\\kernel\\geosite-cn.srs"
+        "path": "E:\\Agents\\DSH_Projects\\yt-b\\kernel\\geosite-cn.srs"
       },
       {
         "type": "local",
         "tag": "geoip-cn",
         "format": "binary",
-        "path": "E:\\Agents\\DSH_Projects\\yt-tool-tauri\\kernel\\geoip-cn.srs"
+        "path": "E:\\Agents\\DSH_Projects\\yt-b\\kernel\\geoip-cn.srs"
       }
     ],
     "final": "proxy",

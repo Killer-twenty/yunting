@@ -127,6 +127,13 @@ test('parseShareLink 不认识返回 null', () => {
   assert.strictEqual(parseShareLink('socks5://1.1.1.1:1080'), null)
 })
 
+test('超范围端口被拒（>65535）', () => {
+  assert.strictEqual(parseShareLink('vless://u@1.1.1.1:70000?security=tls#x'), null)
+  assert.strictEqual(parseShareLink('trojan://p@2.2.2.2:99999#x'), null)
+  const json = { v: '2', ps: 'A', add: '1.1.1.1', port: '65536', id: 'x' }
+  assert.strictEqual(parseShareLink('vmess://' + Buffer.from(JSON.stringify(json)).toString('base64')), null)
+})
+
 // ---------- base64 订阅 ----------
 test('base64 订阅解码', () => {
   const links = [

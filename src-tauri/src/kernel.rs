@@ -268,7 +268,8 @@ pub fn wait_api_ready(port: u16, timeout: Duration) -> Result<(), String> {
             if stream.write_all(req.as_bytes()).is_ok() {
                 let mut buf = [0u8; 512];
                 if let Ok(n) = stream.read(&mut buf) {
-                    if n > 0 && String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/") {
+                    // 必须是 HTTP 2xx（clash api 就绪），随便一个监听端口不算
+                    if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 2") {
                         return Ok(());
                     }
                 }

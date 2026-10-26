@@ -155,14 +155,19 @@ pub struct EnableResult {
     pub via: String,
 }
 
-/// 开系统代理（127.0.0.1:port）。记录原值用于恢复。
+/// 开系统代理（127.0.0.1:port）。记录原值用于恢复（仅在首次 enable 时记录，
+/// 重复 enable 不清掉最早的原始值，保证退出恢复链不丢）。
 pub fn enable(port: u16) -> Result<EnableResult, String> {
     let was_enabled = read_proxy_enable();
     let prev_server = read_proxy_server();
-    {
+    let first_record = {
         let mut s = SAVED.lock().unwrap();
-        *s = Some(SavedProxy { enabled: was_enabled, server: prev_server });
-    }
+        let first = s.is_none();
+        if first {
+            *s = Some(SavedProxy { enabled: was_enabled, server: prev_server });
+        }
+        first
+    };
     let server = format!("127.0.0.1:{port}");
     // 层1: windows-rs 直写（HKCU 本应无需提权）
     let write = (|| -> Result<(), String> {
@@ -178,7 +183,9 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
             match elevate_set(&server) {
                 Ok(()) => "elevate".to_string(),
                 Err(e2) => {
-                    *SAVED.lock().unwrap() = None;
+                    if first_record {
+                        *SAVED.lock().unwrap() = None;
+                    }
                     return Err(format!("系统代理写入失败(已试 winreg/管理员两种方式): {e} / {e2}"));
                 }
             }
@@ -188,29 +195,23 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
     Ok(EnableResult { server, via })
 }
 
-/// UAC 提权写入兜底（-EncodedCommand 绕引号转义问题；每条 reg add 一次提权）
+/// UAC 提权写入兜底（-EncodedCommand 绕引号转义问题；一次提权写两条注册表值）
 fn elevate_set(server: &str) -> Result<(), String> {
     use std::process::Command;
-    let run_elevated = |ps_inner: &str| -> Result<(), String> {
-        let encoded = {
-            let utf16: Vec<u8> = ps_inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-            base64_encode(&utf16)
-        };
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-EncodedCommand", &encoded])
-            .output()
-            .map_err(|e| e.to_string())?;
-        if !out.status.success() {
-            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-        }
-        Ok(())
+    let encoded = {
+        let ps_inner = format!(
+            "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c', 'reg add \"{SUBKEY}\" /v ProxyServer /t REG_SZ /d \"{server}\" /f & reg add \"{SUBKEY}\" /v ProxyEnable /t REG_DWORD /d 1 /f'"
+        );
+        let utf16: Vec<u8> = ps_inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        base64_encode(&utf16)
     };
-    run_elevated(&format!(
-        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c', 'reg add \"{SUBKEY}\" /v ProxyServer /t REG_SZ /d \"{server}\" /f'"
-    ))?;
-    run_elevated(&format!(
-        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c', 'reg add \"{SUBKEY}\" /v ProxyEnable /t REG_DWORD /d 1 /f'"
-    ))?;
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-EncodedCommand", &encoded])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
     // 注册表 flush 缓冲
     std::thread::sleep(std::time::Duration::from_millis(200));
     Ok(())
@@ -232,20 +233,19 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 /// 关系统代理。restore=true 且之前记过原值 → 恢复原值而非简单关闭。
+/// 恢复失败不再静默吞掉 —— 返回值让调用方打日志提示。
 pub fn disable_restore() -> Result<(), String> {
     let saved = SAVED.lock().unwrap().clone();
-    match saved {
+    let r = match saved {
         Some(s) if s.enabled && !s.server.is_empty() => {
-            let _ = reg_set_sz("ProxyServer", &s.server);
-            let _ = reg_set_dword("ProxyEnable", 1);
+            reg_set_sz("ProxyServer", &s.server)?;
+            reg_set_dword("ProxyEnable", 1)
         }
-        _ => {
-            let _ = reg_set_dword("ProxyEnable", 0);
-        }
-    }
+        _ => reg_set_dword("ProxyEnable", 0),
+    };
     *SAVED.lock().unwrap() = None;
     broadcast_setting_change();
-    Ok(())
+    r
 }
 
 /// 强制关闭（不恢复原值）

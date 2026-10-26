@@ -10,6 +10,8 @@ mod kernel;
 mod paths;
 #[path = "../src/store.rs"]
 mod store;
+#[path = "../src/configbuilder.rs"]
+mod configbuilder;
 
 #[test]
 fn sysproxy_registry_roundtrip() {
@@ -109,6 +111,18 @@ fn kernel_check_config() {
     println!("[t] kernel check ✅");
 }
 
+#[test]
+fn configbuilder_rejects_out_of_range_port() {
+    // 超 uint16 范围的节点端口应被拒绝（sing-box 解码 config 时直接 FATAL）
+    let bad = serde_json::json!({ "tag": "BAD", "type": "ss", "server": "1.2.3.4", "server_port": 70000, "method": "aes-256-gcm", "password": "x" });
+    assert!(configbuilder::node_to_outbound(&bad).is_none(), "port 70000 must be rejected");
+    let good = serde_json::json!({ "tag": "OK", "type": "ss", "server": "1.2.3.4", "server_port": 65535, "method": "aes-256-gcm", "password": "x" });
+    assert!(configbuilder::node_to_outbound(&good).is_some(), "port 65535 must be accepted");
+    let zero = serde_json::json!({ "tag": "Z", "type": "ss", "server": "1.2.3.4", "server_port": 0, "method": "aes-256-gcm", "password": "x" });
+    assert!(configbuilder::node_to_outbound(&zero).is_none(), "port 0 must be rejected");
+    println!("[t] configbuilder port range ✅");
+}
+
 /// 测试工作目录: 项目 target/smoke-tmp/<name>（temp_dir 在受限会话+非 ASCII 用户名下拒写）
 fn smoke_tmp_dir(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("smoke-tmp").join(name)
@@ -188,19 +202,37 @@ async fn kernel_lifecycle() {
 }
 
 #[test]
-fn store_roundtrip() {
-    // store 用 %APPDATA%\yt-tool —— 测试里读写一遍
+fn store_roundtrip_and_corrupt_recovery() {    // store 默认用 %APPDATA%\yt-tool；受限会话下该目录可能拒写 → 测试用 YT_DATA_DIR 隔离
+    // （不污染真实用户数据；默认路径策略另由真实环境验证）
+    // 注意: paths::data_dir() 用 OnceLock 缓存，本测试必须先设置 YT_DATA_DIR 再首次访问
+    let iso = smoke_tmp_dir("store");
+    let _ = std::fs::remove_dir_all(&iso);
+    std::fs::create_dir_all(&iso).unwrap();
+    std::env::set_var("YT_DATA_DIR", &iso);
+    let d = paths::data_dir();
+    assert!(d.exists() && d.is_dir());
+    let probe = d.join("diag-probe.txt");
+    assert!(std::fs::write(&probe, b"x").is_ok(), "isolated data dir must be writable");
+    let _ = std::fs::remove_file(&probe);
     let s0 = store::load_settings();
     println!("[t] settings: {:?}", s0);
     let mut s = s0.clone();
     let orig_port = s.mixed_port;
     s.mixed_port = 20809;
-    store::save_settings(&s);
+    store::save_settings(&s).expect("save settings must succeed in isolated dir");
     let s1 = store::load_settings();
     assert_eq!(s1.mixed_port, 20809);
     // 还原
     let mut s2 = s1;
     s2.mixed_port = orig_port;
-    store::save_settings(&s2);
-    println!("[t] store roundtrip ✅");
+    store::save_settings(&s2).expect("restore save failed");
+    let s3 = store::load_settings();
+    assert_eq!(s3.mixed_port, orig_port);
+
+    // 损坏 JSON → 备份 .corrupt 并回默认，不 panic 不丢现场
+    std::fs::write(d.join("settings.json"), b"{ not json !!!").unwrap();
+    let s4 = store::load_settings();
+    assert_eq!(s4.mixed_port, 7890, "corrupt settings should fall back to default");
+    assert!(d.join("settings.json.corrupt").exists(), "corrupt file should be preserved");
+    println!("[t] store roundtrip + corrupt recovery ✅");
 }

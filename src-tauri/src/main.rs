@@ -70,7 +70,6 @@ fn port_busy(port: u16) -> bool {
 // ============================================================
 #[tauri::command]
 fn nodes_get() -> Vec<Value> {
-    diag("[cmd] nodes_get ← JS 调用到达（bridge 已就绪）");
     load_nodes()
 }
 
@@ -88,21 +87,21 @@ fn nodes_add(app: AppHandle, nodes: Vec<Value>) -> Result<Value, String> {
     }
     let merged = dedupe(merged);
     let added = merged.len() - existing.len();
-    save_nodes(merged.clone());
+    save_nodes(merged.clone())?;
     log_line(&app, format!("导入 {added} 个节点（识别 {parsed_count}，去重后新增 {added}）"));
     Ok(json!({ "added": added, "total": merged.len() }))
 }
 
 #[tauri::command]
-fn nodes_remove(tag: String) -> usize {
+fn nodes_remove(tag: String) -> Result<usize, String> {
     let nodes = load_nodes();
     let next: Vec<_> = nodes
         .into_iter()
         .filter(|n| n.get("tag").and_then(|v| v.as_str()) != Some(tag.as_str()))
         .collect();
     let n = next.len();
-    save_nodes(next);
-    n
+    save_nodes(next)?;
+    Ok(n)
 }
 
 /// 与旧版 parsers.js dedupeNodes 一致：raw 相同或 type|server|port 相同视为同一节点
@@ -169,7 +168,7 @@ async fn subs_add(app: AppHandle, url: String, name: Option<String>, nodes: Vec<
     });
     let mut subs = load_subs();
     subs.push(sub);
-    save_subs(subs);
+    save_subs(subs)?;
     // 替换该订阅的节点
     let mut existing: Vec<Value> = load_nodes()
         .into_iter()
@@ -179,7 +178,7 @@ async fn subs_add(app: AppHandle, url: String, name: Option<String>, nodes: Vec<
         n["subId"] = json!(id);
         existing.push(n);
     }
-    save_nodes(dedupe(existing));
+    save_nodes(dedupe(existing))?;
     log_line(&app, format!("订阅添加成功：{node_count} 节点"));
     Ok(json!({ "ok": true, "id": id }))
 }
@@ -198,7 +197,7 @@ async fn subs_update(app: AppHandle, id: String, nodes: Vec<Value>) -> Result<Va
     log_line(&app, format!("更新订阅 {} ...", sub.get("name").and_then(|v| v.as_str()).unwrap_or("")));
     sub["updatedAt"] = json!(now_millis());
     sub["nodeCount"] = json!(node_count);
-    save_subs(subs);
+    save_subs(subs)?;
     let mut existing: Vec<Value> = load_nodes()
         .into_iter()
         .filter(|n| n.get("subId").and_then(|v| v.as_str()) != Some(id.as_str()))
@@ -207,25 +206,25 @@ async fn subs_update(app: AppHandle, id: String, nodes: Vec<Value>) -> Result<Va
         n["subId"] = json!(id);
         existing.push(n);
     }
-    save_nodes(dedupe(existing));
+    save_nodes(dedupe(existing))?;
     log_line(&app, format!("订阅 {id} 更新成功：{node_count} 节点"));
     Ok(json!({ "ok": true }))
 }
 
 #[tauri::command]
-fn subs_remove(id: String) -> usize {
+fn subs_remove(id: String) -> Result<usize, String> {
     let subs: Vec<Value> = load_subs()
         .into_iter()
         .filter(|s| s.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
         .collect();
     let n = subs.len();
-    save_subs(subs);
+    save_subs(subs)?;
     let nodes: Vec<Value> = load_nodes()
         .into_iter()
         .filter(|nd| nd.get("subId").and_then(|v| v.as_str()) != Some(id.as_str()))
         .collect();
-    save_nodes(nodes);
-    n
+    save_nodes(nodes)?;
+    Ok(n)
 }
 
 // ============================================================
@@ -259,8 +258,12 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     let dir = data_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let cfg_path = dir.join("config.json");
-    std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg).unwrap())
-        .map_err(|e| e.to_string())?;
+    let cfg_bytes = serde_json::to_vec_pretty(&cfg).map_err(|e| format!("config 序列化失败: {e}"))?;
+    // 原子写（tmp → 删旧 → rename），避免崩溃留半截 config
+    let tmp_path = dir.join("config.json.tmp");
+    std::fs::write(&tmp_path, &cfg_bytes).map_err(|e| format!("config 写入失败: {e}"))?;
+    let _ = std::fs::remove_file(&cfg_path);
+    std::fs::rename(&tmp_path, &cfg_path).map_err(|e| format!("config 替换失败: {e}"))?;
     log_line(&app, format!("[core] config 写入 {}", cfg_path.display()));
 
     // check
@@ -315,7 +318,8 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
             log_line(&app, format!("[core] clash api 未就绪: {e}"));
             let state = app.state::<KernelState>();
             let km = state.0.lock().await;
-            let _ = km.stop();
+            // 停止内核（内核都没起来时 stop 内部直接置位返回）
+            let _ = km.stop().await;
             drop(km);
             Err(format!("内核启动失败: {e}"))
         }
@@ -395,7 +399,13 @@ fn settings_save(s: Settings) -> Result<Settings, String> {
     if !["rule", "global"].contains(&s.route_mode.as_str()) {
         return Err(format!("未知分流模式: {}", s.route_mode));
     }
-    store::save_settings(&s);
+    if s.mixed_port == 0 || s.clash_api_port == 0 {
+        return Err("端口不能为 0".into());
+    }
+    if s.mixed_port == s.clash_api_port {
+        return Err("本地端口与 API 端口不能相同".into());
+    }
+    store::save_settings(&s)?;
     Ok(s)
 }
 
@@ -412,8 +422,10 @@ fn diag_paths() -> Value {
 }
 
 /// 前端 bridge 用来拉订阅文本（带 UA + 超时；解析仍在前端 parsers.js 做）
+/// 上限 10MB：畸形/恶意订阅响应不会撑爆内存
 #[tauri::command]
 async fn fetch_text(url: String) -> Result<String, String> {
+    const MAX_BYTES: usize = 10 * 1024 * 1024;
     let r = reqwest::Client::builder()
         .user_agent("clash-verge/1.7.7")
         .timeout(std::time::Duration::from_secs(20))
@@ -426,10 +438,19 @@ async fn fetch_text(url: String) -> Result<String, String> {
     if !r.status().is_success() {
         return Err(format!("订阅拉取失败 HTTP {}", r.status()));
     }
-    r.text().await.map_err(|e| e.to_string())
+    let mut bytes = Vec::new();
+    let mut r = r;
+    while let Some(chunk) = r.chunk().await.map_err(|e| e.to_string())? {
+        if bytes.len() + chunk.len() > MAX_BYTES {
+            return Err("订阅内容过大（>10MB）".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).map_err(|e| format!("订阅内容编码异常: {e}"))
 }
 
 /// 启动诊断日志（exe 旁 data/main-diag.log）—— 桌面排障用（GUI 子系统无 stderr）
+/// 轮转: 超 256KB 时把旧日志转 .old，防无限增长
 pub fn diag(msg: &str) {
     use std::io::Write;
     let exe_dir = std::env::current_exe()
@@ -437,10 +458,14 @@ pub fn diag(msg: &str) {
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
         .unwrap_or_default();
     let _ = std::fs::create_dir_all(exe_dir.join("data"));
+    let log = exe_dir.join("data").join("main-diag.log");
+    if log.metadata().map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+        let _ = std::fs::rename(&log, exe_dir.join("data").join("main-diag.log.old"));
+    }
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(exe_dir.join("data").join("main-diag.log"))
+        .open(&log)
     {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -484,7 +509,7 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             // 窗口销毁时同步清理底层资源（注册表恢复 + 停内核）
-            if matches!(event, tauri::WindowEvent::Destroyed { .. }) {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle().clone();
                 let _ = sysproxy::disable_restore();
                 if let Some(state) = app.try_state::<KernelState>() {

@@ -166,6 +166,9 @@ fn outbound_type(t: &str) -> Option<&'static str> {
 pub fn node_to_outbound(node: &Value) -> Option<Value> {
     let server = node.get("server")?.as_str()?;
     let port = node.get("server_port")?.as_u64()?;
+    if port == 0 || port > 65535 {
+        return None; // 超 uint16 范围 sing-box 拒收
+    }
     let ntype = node.get("type")?.as_str()?;
     let ob_type = outbound_type(ntype)?;
     let tag = node

@@ -14,3 +14,4 @@ data/electron/
 data/config.json
 data/cache.db
 data/main-diag.log
+_audit-baseline/

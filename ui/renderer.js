@@ -212,7 +212,16 @@ async function testAll() {
   if (tags.length === 0) return toast('没有节点', true)
   if (!(state.core && state.core.running)) return toast('请先连接内核（延迟测试走 clash api）', true)
   toast(`测 ${tags.length} 个节点…`)
-  await Promise.all(tags.map(testDelay))
+  // 限并发 5：一次打满 clash api 会导致后端超时+前端卡顿
+  const CONCURRENCY = 5
+  let i = 0
+  const workers = Array.from({ length: Math.min(CONCURRENCY, tags.length) }, async () => {
+    while (i < tags.length) {
+      const tag = tags[i++]
+      await testDelay(tag)
+    }
+  })
+  await Promise.all(workers)
 }
 
 // ---------- 设置 ----------

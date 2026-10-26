@@ -65,6 +65,7 @@ function parseUri(uri) {
     port = parseInt(rest.slice(cIdx + 1), 10)
   }
   if (!host || !port) return null
+  if (!(port > 0 && port <= 65535)) return null // 超出 uint16 范围 sing-box 直接拒收
   return { scheme, userinfo, host, port, params, name }
 }
 
@@ -139,6 +140,7 @@ function parseVmess(uri) {
   if (!json || !json.add || !json.id) return null
   const port = parseInt(json.port, 10)
   if (!port) return null
+  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const node = {
     tag: (json.ps && String(json.ps)) || `${json.add}:${port}`,
     type: 'vmess',
@@ -230,6 +232,7 @@ function parseSS(uri) {
     method = m[1]; password = m[2]; host = m[3]; port = parseInt(m[4], 10)
   }
   if (!host || !port || !method) return null
+  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const node = {
     tag: name || `${host}:${port}`,
     type: 'ss',
@@ -345,6 +348,7 @@ function parseClashSubscription(yamlText) {
 function clashProxyToNode(p) {
   const port = parseInt(p.port, 10)
   if (!port) return null
+  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const tag = p.name || `${p.server}:${port}`
   const base = { tag, server: String(p.server), server_port: port }
 
