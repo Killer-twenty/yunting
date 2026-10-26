@@ -80,7 +80,8 @@ impl KernelManager {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .creation_flags_hide();
+            .creation_flags_hide()
+            .kill_on_drop(true); // guard 丢失时自动杀进程，防孤儿
         let mut child = cmd.spawn().map_err(|e| format!("内核启动失败: {e}"))?;
         let pid = child.id().unwrap_or(0);
         *self.pid.lock().unwrap() = Some(pid);
@@ -256,18 +257,21 @@ pub fn check_config(exe: &Path, cfg: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// clash api 就绪等待（阻塞式循环 GET /version；放 spawn_blocking 跑）
+/// clash api 就绪等待（阻塞式原始 HTTP 探测，无 reqwest::blocking 依赖 —— 它在 tokio 运行时内会挂起）
 pub fn wait_api_ready(port: u16, timeout: Duration) -> Result<(), String> {
+    use std::io::{Read, Write};
     let deadline = std::time::Instant::now() + timeout;
-    let url = format!("http://127.0.0.1:{port}/version");
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .map_err(|e| e.to_string())?;
     loop {
-        if let Ok(resp) = client.get(&url).send() {
-            if resp.status().is_success() {
-                return Ok(());
+        if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let req = format!("GET /version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+            if stream.write_all(req.as_bytes()).is_ok() {
+                let mut buf = [0u8; 512];
+                if let Ok(n) = stream.read(&mut buf) {
+                    if n > 0 && String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/") {
+                        return Ok(());
+                    }
+                }
             }
         }
         if std::time::Instant::now() > deadline {

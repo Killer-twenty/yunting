@@ -1,0 +1,196 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "local-dns",
+        "address": "223.5.5.5",
+        "detour": "direct"
+      },
+      {
+        "tag": "proxy-dns",
+        "address": "https://1.1.1.1/dns-query",
+        "detour": "proxy"
+      }
+    ],
+    "rules": [
+      {
+        "rule_set": "geosite-cn",
+        "server": "local-dns"
+      },
+      {
+        "clash_mode": "Global",
+        "server": "proxy-dns"
+      }
+    ],
+    "final": "proxy-dns",
+    "strategy": "prefer_ipv4"
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 20808
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "HK-Reality",
+      "type": "vless",
+      "server": "1.2.3.4",
+      "server_port": 443,
+      "uuid": "u1",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "PBK",
+          "short_id": "01"
+        }
+      }
+    },
+    {
+      "tag": "JP-WS",
+      "type": "vmess",
+      "server": "5.6.7.8",
+      "server_port": 10086,
+      "uuid": "u2",
+      "security": "auto",
+      "tls": {
+        "enabled": true,
+        "server_name": "a.com"
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/vm",
+        "headers": {
+          "Host": "a.com"
+        }
+      }
+    },
+    {
+      "tag": "SS1",
+      "type": "shadowsocks",
+      "server": "3.3.3.3",
+      "server_port": 8388,
+      "method": "aes-256-gcm",
+      "password": "p1"
+    },
+    {
+      "tag": "HY2",
+      "type": "hysteria2",
+      "server": "4.4.4.4",
+      "server_port": 8443,
+      "password": "p2",
+      "obfs": {
+        "type": "salamander",
+        "password": "ob"
+      },
+      "tls": {
+        "enabled": true,
+        "server_name": "h.example.com"
+      }
+    },
+    {
+      "type": "selector",
+      "tag": "proxy",
+      "outbounds": [
+        "auto",
+        "HK-Reality",
+        "JP-WS",
+        "SS1",
+        "HY2"
+      ],
+      "default": "JP-WS",
+      "interrupt_exist_connections": false
+    },
+    {
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": [
+        "HK-Reality",
+        "JP-WS",
+        "SS1",
+        "HY2"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "5m",
+      "tolerance": 50,
+      "idle_timeout": "30m"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "clash_mode": "Direct",
+        "outbound": "direct"
+      },
+      {
+        "clash_mode": "Global",
+        "outbound": "proxy"
+      },
+      {
+        "rule_set": [
+          "geosite-cn"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "rule_set": [
+          "geoip-cn"
+        ],
+        "outbound": "direct"
+      }
+    ],
+    "rule_set": [
+      {
+        "type": "local",
+        "tag": "geosite-cn",
+        "format": "binary",
+        "path": "E:\\Agents\\DSH_Projects\\yt-tool-tauri\\kernel\\geosite-cn.srs"
+      },
+      {
+        "type": "local",
+        "tag": "geoip-cn",
+        "format": "binary",
+        "path": "E:\\Agents\\DSH_Projects\\yt-tool-tauri\\kernel\\geoip-cn.srs"
+      }
+    ],
+    "final": "proxy",
+    "auto_detect_interface": true
+  },
+  "experimental": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "default_mode": "rule"
+    },
+    "cache_file": {
+      "enabled": true
+    }
+  }
+}

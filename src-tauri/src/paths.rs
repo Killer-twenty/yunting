@@ -40,24 +40,24 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn kernel_dir() -> PathBuf {
-    if is_packaged() {
-        let k = exe_dir().join("kernel");
-        if k.is_dir() {
-            return k;
-        }
-    }
-    // 开发态: 项目根 kernel/  (src-tauri/src/paths.rs → ../../..
-    // current_exe = target/debug/yt-tool.exe → 项目根 = exe_dir/../../../
-    let exe = std::env::current_exe().unwrap_or_default();
-    if let Some(root) = exe
-        .ancestors()
-        .nth(3) // target/debug/yt-tool.exe → 上 3 级 = 项目根
+    // 打包态: exe 旁 kernel/
     {
-        let k = root.join("kernel");
-        if k.is_dir() {
+        let k = exe_dir().join("kernel");
+        if k.join("sing-box.exe").exists() {
             return k;
         }
     }
+    // 开发态: 从 exe 向上找包含 kernel/sing-box.exe 的目录
+    //   target\debug\yt-tool.exe → 项目根；target\debug\deps\test.exe → 项目根
+    if let Ok(exe) = std::env::current_exe() {
+        for anc in exe.ancestors().skip(1) {
+            let k = anc.join("kernel");
+            if k.join("sing-box.exe").exists() {
+                return k;
+            }
+        }
+    }
+    // 兜底
     exe_dir().join("kernel")
 }
 

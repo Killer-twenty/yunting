@@ -1,0 +1,17 @@
+
+running 1 test
+
+thread 'matches_js_reference_output' (10784) panicked at tests\config_compare.rs:49:9:
+assertion `left == right` failed: rule_set type mismatch
+  left: String("remote")
+ right: String("local")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test matches_js_reference_output ... FAILED
+
+failures:
+
+failures:
+    matches_js_reference_output
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

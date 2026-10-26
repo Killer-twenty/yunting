@@ -1,0 +1,30 @@
+
+running 5 tests
+
+thread 'kernel_check_config' (5708) panicked at tests\smoke.rs:103:35:
+called `Result::unwrap()` on an `Err` value: Os { code: 5, kind: PermissionDenied, message: "拒绝访问。" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test kernel_check_config ... FAILED
+
+thread 'kernel_lifecycle' (7864) panicked at tests\smoke.rs:124:35:
+called `Result::unwrap()` on an `Err` value: Os { code: 5, kind: PermissionDenied, message: "拒绝访问。" }
+test kernel_lifecycle ... FAILED
+test port_detection ... [t] port busy detection ✅ (port 53435)
+ok
+test store_roundtrip ... [t] settings: Settings { mixed_port: 20808, clash_api_port: 9090, auto_system_proxy: true, route_mode: "rule" }
+[t] store roundtrip ✅
+ok
+test sysproxy_registry_roundtrip ... [t] before: enabled=false server="127.0.0.1:7890" ours=false
+[sysproxy] winreg direct write failed: RegSetValueExW(ProxyServer) error WIN32_ERROR(5); elevating...
+[t] enabled via elevate → 127.0.0.1:59998
+[t] SKIP: 受限会话（无头窗口站）内注册表写入不生效 —— 用户桌面双击不受影响（Electron 版同类问题已在旧 PROGRESS 记录）
+ok
+
+failures:
+
+failures:
+    kernel_check_config
+    kernel_lifecycle
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.29s
+

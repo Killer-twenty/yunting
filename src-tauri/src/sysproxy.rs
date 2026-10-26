@@ -164,16 +164,22 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
         *s = Some(SavedProxy { enabled: was_enabled, server: prev_server });
     }
     let server = format!("127.0.0.1:{port}");
-    // 层1: windows-rs 直写
-    let via = match (reg_set_sz("ProxyServer", &server), reg_set_dword("ProxyEnable", 1)) {
-        (Ok(()), Ok(())) => "winreg".to_string(),
-        _ => {
+    // 层1: windows-rs 直写（HKCU 本应无需提权）
+    let write = (|| -> Result<(), String> {
+        reg_set_sz("ProxyServer", &server)?;
+        reg_set_dword("ProxyEnable", 1)?;
+        Ok(())
+    })();
+    let via = match write {
+        Ok(()) => "winreg".to_string(),
+        Err(e) => {
             // 层2: UAC 提权兜底（用户点"是"）
+            eprintln!("[sysproxy] winreg direct write failed: {e}; elevating...");
             match elevate_set(&server) {
                 Ok(()) => "elevate".to_string(),
-                Err(e) => {
+                Err(e2) => {
                     *SAVED.lock().unwrap() = None;
-                    return Err(format!("系统代理写入失败(已试 winreg/管理员两种方式): {e}"));
+                    return Err(format!("系统代理写入失败(已试 winreg/管理员两种方式): {e} / {e2}"));
                 }
             }
         }
@@ -182,20 +188,47 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
     Ok(EnableResult { server, via })
 }
 
-/// UAC 提权写入兜底
+/// UAC 提权写入兜底（-EncodedCommand 绕引号转义问题；每条 reg add 一次提权）
 fn elevate_set(server: &str) -> Result<(), String> {
     use std::process::Command;
-    let ps = format!(
-        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c','reg add \"{SUBKEY}\" /v ProxyServer /t REG_SZ /d \"{server}\" /f && reg add \"{SUBKEY}\" /v ProxyEnable /t REG_DWORD /d 1 /f'"
-    );
-    let out = Command::new("powershell")
-        .args(["-NoProfile", "-Command", &ps])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
+    let run_elevated = |ps_inner: &str| -> Result<(), String> {
+        let encoded = {
+            let utf16: Vec<u8> = ps_inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+            base64_encode(&utf16)
+        };
+        let out = Command::new("powershell")
+            .args(["-NoProfile", "-EncodedCommand", &encoded])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        Ok(())
+    };
+    run_elevated(&format!(
+        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c', 'reg add \"{SUBKEY}\" /v ProxyServer /t REG_SZ /d \"{server}\" /f'"
+    ))?;
+    run_elevated(&format!(
+        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c', 'reg add \"{SUBKEY}\" /v ProxyEnable /t REG_DWORD /d 1 /f'"
+    ))?;
+    // 注册表 flush 缓冲
+    std::thread::sleep(std::time::Duration::from_millis(200));
     Ok(())
+}
+
+/// 标准 base64（无依赖实现）
+fn base64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+    }
+    out
 }
 
 /// 关系统代理。restore=true 且之前记过原值 → 恢复原值而非简单关闭。

@@ -1,0 +1,24 @@
+{
+  "nodes": [
+    {
+      "tag": "HK-Reality", "type": "vless", "server": "1.2.3.4", "server_port": 443, "uuid": "u1",
+      "flow": "xtls-rprx-vision",
+      "tls": { "enabled": true, "server_name": "www.microsoft.com", "utls": { "enabled": true, "fingerprint": "chrome" }, "reality": { "enabled": true, "public_key": "PBK", "short_id": "01" } }
+    },
+    {
+      "tag": "JP-WS", "type": "vmess", "server": "5.6.7.8", "server_port": 10086, "uuid": "u2", "security": "auto",
+      "tls": { "enabled": true, "server_name": "a.com" }, "transport": { "type": "ws", "path": "/vm", "headers": { "Host": "a.com" } }
+    },
+    {
+      "tag": "SS1", "type": "ss", "server": "3.3.3.3", "server_port": 8388, "method": "aes-256-gcm", "password": "p1"
+    },
+    {
+      "tag": "HY2", "type": "hysteria2", "server": "4.4.4.4", "server_port": 8443, "password": "p2",
+      "tls": { "enabled": true, "server_name": "h.example.com" }, "obfs": { "type": "salamander", "password": "ob" }
+    }
+  ],
+  "selectedTag": "JP-WS",
+  "mixedPort": 20808,
+  "clashApiPort": 9090,
+  "mode": "rule"
+}

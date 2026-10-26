@@ -1,0 +1,17 @@
+
+running 1 test
+
+test matches_js_reference_output ... FAILED
+
+failures:
+
+failures:
+    matches_js_reference_output
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+thread 'matches_js_reference_output' (18160) panicked at tests\config_compare.rs:36:5:
+assertion `left == right` failed: dns mismatch
+  left: Object {"final": String("proxy-dns"), "rules": Array [Object {"rule_set": Array [String("geosite-cn")], "server": String("local-dns")}, Object {"clash_mode": String("Global"), "server": String("proxy-dns")}], "servers": Array [Object {"address": String("223.5.5.5"), "detour": String("direct"), "tag": String("local-dns")}, Object {"address": String("https://1.1.1.1/dns-query"), "detour": String("proxy"), "tag": String("proxy-dns")}], "strategy": String("prefer_ipv4")}
+ right: Object {"final": String("proxy-dns"), "rules": Array [Object {"rule_set": String("geosite-cn"), "server": String("local-dns")}, Object {"clash_mode": String("Global"), "server": String("proxy-dns")}], "servers": Array [Object {"address": String("223.5.5.5"), "detour": String("direct"), "tag": String("local-dns")}, Object {"address": String("https://1.1.1.1/dns-query"), "detour": String("proxy"), "tag": String("proxy-dns")}], "strategy": String("prefer_ipv4")}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

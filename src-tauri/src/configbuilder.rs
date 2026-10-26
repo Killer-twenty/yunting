@@ -53,7 +53,7 @@ pub fn build_config(
         "tolerance": 50,
         "idle_timeout": "30m",
     }));
-    outbounds.push(json!({ "type": "direct", "tag": "direct", "domain_resolver": "local-dns" }));
+    outbounds.push(json!({ "type": "direct", "tag": "direct" }));
     outbounds.push(json!({ "type": "block", "tag": "block" }));
 
     let config = json!({
@@ -76,9 +76,10 @@ pub fn build_config(
 }
 
 fn build_dns(mode: &str) -> Value {
+    // sing-box 1.11 旧格式: address 字段, 无 type（1.12 才引入 type/server）
     let servers = json!([
-        { "tag": "local-dns", "type": "udp", "server": "223.5.5.5" },
-        { "tag": "proxy-dns", "type": "https", "server": "1.1.1.1", "domain_resolver": "local-dns" },
+        { "tag": "local-dns", "address": "223.5.5.5", "detour": "direct" },
+        { "tag": "proxy-dns", "address": "https://1.1.1.1/dns-query", "detour": "proxy" },
     ]);
     if mode == "global" {
         return json!({
@@ -90,7 +91,7 @@ fn build_dns(mode: &str) -> Value {
     json!({
         "servers": servers,
         "rules": [
-            { "rule_set": ["geosite-cn"], "server": "local-dns" },
+            { "rule_set": "geosite-cn", "server": "local-dns" },
             { "clash_mode": "Global", "server": "proxy-dns" },
         ],
         "final": "proxy-dns",
