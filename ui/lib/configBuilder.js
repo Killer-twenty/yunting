@@ -66,7 +66,7 @@ function buildConfig(profile) {
     dns: buildDns(proxyTags, mode),
     inbounds: buildInbounds(profile, mixedPort),
     outbounds,
-    route: buildRoute(mode),
+    route: buildRoute(mode, profile.directList || []),
     experimental: {
       clash_api: {
         external_controller: `127.0.0.1:${clashApiPort}`,
@@ -132,8 +132,9 @@ function buildDns(proxyTags, mode = 'rule') {
 }
 
 // ---------- route：按 mode 生成分流 ----------
-// mode: 'rule'(默认, 国内直连+国外代理) | 'global'(全部走代理)
-function buildRoute(mode = 'rule') {
+// mode: 'rule'(默认, 国内直连+白名单直连+国外代理) | 'global'(全部走代理)
+// directList: 用户自定义直连域名列表（后缀匹配，如 "openai.com" 覆盖所有子域）
+function buildRoute(mode = 'rule', directList = []) {
   if (mode === 'global') {
     return {
       rules: [
@@ -145,16 +146,20 @@ function buildRoute(mode = 'rule') {
       auto_detect_interface: true,
     }
   }
-  // rule 模式
+  // rule 模式：白名单优先级最高（在 geosite/geoip 之前）
+  const rules = [
+    { action: 'sniff' },
+    { protocol: 'dns', action: 'hijack-dns' },
+    { clash_mode: 'Direct', outbound: 'direct' },
+    { clash_mode: 'Global', outbound: 'proxy' },
+  ]
+  if (directList && directList.length > 0) {
+    rules.push({ domain_suffix: directList, outbound: 'direct' })
+  }
+  rules.push({ rule_set: ['geosite-cn'], outbound: 'direct' })
+  rules.push({ rule_set: ['geoip-cn'], outbound: 'direct' })
   return {
-    rules: [
-      { action: 'sniff' },
-      { protocol: 'dns', action: 'hijack-dns' },
-      { clash_mode: 'Direct', outbound: 'direct' },
-      { clash_mode: 'Global', outbound: 'proxy' },
-      { rule_set: ['geosite-cn'], outbound: 'direct' },
-      { rule_set: ['geoip-cn'], outbound: 'direct' },
-    ],
+    rules,
     rule_set: [
       localRuleSet('geosite-cn'),
       localRuleSet('geoip-cn'),

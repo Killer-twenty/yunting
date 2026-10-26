@@ -20,5 +20,6 @@
   "selectedTag": "JP-WS",
   "mixedPort": 20808,
   "clashApiPort": 9090,
-  "mode": "rule"
+  "mode": "rule",
+  "directList": ["openai.com", "anthropic.com"]
 }

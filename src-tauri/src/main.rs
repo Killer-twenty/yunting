@@ -250,7 +250,7 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     }
 
     // Rust 侧生成 config（configbuilder.rs 纯函数）
-    let cfg = configbuilder::build_config(&nodes, &selected_tag, mixed_port, api_port, mode)?;
+    let cfg = configbuilder::build_config(&nodes, &selected_tag, mixed_port, api_port, mode, &settings.direct_list)?;
     let exe = kernel_exe();
     if !exe.exists() {
         return Err(format!("内核不存在: {}", exe.display()));

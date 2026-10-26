@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost" />
   <title>云亭</title>
   <style>
     :root {
@@ -17,205 +17,303 @@
     body {
       font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
       background: var(--bg); color: var(--fg);
-      display: flex; flex-direction: column; overflow: hidden;
-      font-size: 13px; user-select: none;
+      display: flex; overflow: hidden; font-size: 13px; user-select: none;
     }
-    header {
-      display: flex; align-items: center; gap: 14px;
-      padding: 10px 16px; background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      -webkit-app-region: drag;
+    /* ============ 左侧导航 ============ */
+    aside.nav {
+      width: 168px; background: var(--bg2); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding-top: 0; flex-shrink: 0;
     }
-    header .logo { font-size: 16px; font-weight: 600; color: var(--accent); }
-    header .spacer { flex: 1; -webkit-app-region: no-drag; }
-    #navTabs { display: flex; gap: 4px; -webkit-app-region: no-drag; }
-    .nav-tab {
-      background: transparent; border: 1px solid transparent; border-radius: 8px;
-      padding: 5px 14px; font-size: 13px; color: var(--fg-dim); cursor: pointer; font-family: inherit;
+    .nav-logo {
+      padding: 18px 16px 14px; font-size: 17px; font-weight: 700; color: var(--accent);
+      border-bottom: 1px solid var(--border); letter-spacing: 1px;
     }
-    .nav-tab:hover:not(:disabled) { color: var(--fg); }
-    .nav-tab.active { background: var(--bg3); color: var(--accent); border-color: var(--border); font-weight: 600; }
-    .nav-tab:disabled { opacity: .4; cursor: default; }
-    .pill {
-      padding: 3px 10px; border-radius: 10px; font-size: 12px;
-      background: var(--bg3); color: var(--fg-dim);
-      -webkit-app-region: no-drag;
+    .nav-items { padding: 10px 8px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px; border-radius: 8px; cursor: pointer;
+      color: var(--fg-dim); font-size: 13px; border: 1px solid transparent;
     }
-    .pill.on { color: var(--ok); }
+    .nav-item:hover { color: var(--fg); background: var(--bg3); }
+    .nav-item.active { background: var(--bg3); color: var(--accent); font-weight: 600; border-color: var(--border); }
+    .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
+    .nav-item .badge { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
+    /* 底部连接状态 */
+    .nav-footer { padding: 12px 14px; border-top: 1px solid var(--border); }
+    .status-pill {
+      display: flex; align-items: center; gap: 7px; padding: 6px 10px;
+      background: var(--bg3); border-radius: 8px; font-size: 12px; color: var(--fg-dim);
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+    .status-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+    .status-dot.err { background: var(--err); }
+    /* ============ 主区 ============ */
+    main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    .page { flex: 1; display: none; flex-direction: column; min-height: 0; }
+    .page.active { display: flex; }
+    .page-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--bg2);
+    }
+    .page-header h2 { font-size: 15px; font-weight: 600; }
+    .page-header .sub { font-size: 12px; color: var(--fg-dim); }
+    .page-body { flex: 1; overflow-y: auto; padding: 14px 18px; min-height: 0; }
+    /* 通用按钮/输入 */
     button {
       background: var(--bg3); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer;
-      font-family: inherit;
+      border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
     }
     button:hover { border-color: var(--accent); }
     button:disabled { opacity: .45; cursor: default; }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-    button.primary.stop { background: var(--err); border-color: var(--err); }
-    input[type=text], select {
+    button.stop { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+    input[type=text], select, textarea {
       background: var(--bg3); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 6px 10px; font-size: 13px; font-family: inherit;
-      outline: none; width: 100%;
+      border-radius: 6px; padding: 6px 10px; font-size: 13px; font-family: inherit; outline: none; width: 100%;
     }
-    input[type=text]:focus { border-color: var(--accent); }
-    main { flex: 1; display: flex; overflow: hidden; }
-    /* 左：节点区 */
-    .left { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
-    .toolbar { display: flex; gap: 8px; padding: 10px 12px; align-items: center; }
-    .toolbar input { flex: 1; }
-    #nodeList { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+    input[type=text]:focus, textarea:focus { border-color: var(--accent); }
+    input[type=checkbox] { accent-color: var(--accent); }
+    /* ============ VPN 面板 ============ */
+    .vpn-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .vpn-toolbar input { flex: 1; }
+    .connect-bar {
+      display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    }
+    .connect-bar .target { flex: 1; min-width: 0; }
+    .connect-bar .target .name { font-size: 14px; font-weight: 600; }
+    .connect-bar .target .desc { font-size: 12px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .node-list { display: flex; flex-direction: column; gap: 4px; }
     .node {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 10px; margin-bottom: 4px;
-      background: var(--bg2); border: 1px solid transparent; border-radius: 8px;
-      cursor: pointer;
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: var(--bg2); border: 1px solid transparent; border-radius: 8px; cursor: pointer;
     }
     .node:hover { border-color: var(--border); }
     .node.selected { border-color: var(--accent); background: #1a2532; }
     .node .tag { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .node .type { font-size: 11px; color: var(--fg-dim); background: var(--bg3); padding: 1px 7px; border-radius: 8px; }
     .node .delay { font-size: 12px; min-width: 48px; text-align: right; }
-    .delay.good { color: var(--ok); } .delay.mid { color: var(--warn); } .delay.bad { color: var(--fg-dim); } .dl-fail { color: var(--err); font-size: 11px; }
+    .delay.good { color: var(--ok); } .delay.mid { color: var(--warn); } .delay.bad { color: var(--fg-dim); }
+    .dl-fail { color: var(--err); font-size: 11px; }
     .node .del { visibility: hidden; background: none; border: none; color: var(--fg-dim); padding: 0 4px; }
     .node:hover .del { visibility: visible; }
     .node .del:hover { color: var(--err); }
-    /* 右：订阅 + 日志 + 设置 */
-    .right { width: 340px; display: flex; flex-direction: column; background: var(--bg2); }
-    .panel { padding: 10px 12px; border-bottom: 1px solid var(--border); }
-    .panel h3 { font-size: 12px; color: var(--fg-dim); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px; }
-    .sub-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
-    .sub-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sub-row button { padding: 2px 8px; font-size: 12px; }
-    .sub-form { display: flex; gap: 6px; margin-bottom: 6px; }
-    #logPanel { flex: 1; display: flex; flex-direction: column; min-height: 120px; }
+    .empty { color: var(--fg-dim); text-align: center; padding: 40px 20px; }
+    /* ============ 订阅面板 ============ */
+    .sub-row {
+      display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 6px;
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    }
+    .sub-row .name { flex: 1; min-width: 0; }
+    .sub-row .name .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub-row .name .u { font-size: 11px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub-row .meta { font-size: 11px; color: var(--fg-dim); text-align: right; }
+    .sub-row button { padding: 3px 10px; font-size: 12px; }
+    /* ============ 设置面板 ============ */
+    .settings-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 16px; margin-bottom: 12px;
+    }
+    .settings-card h3 { font-size: 12px; color: var(--fg-dim); font-weight: 600; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+    .settings-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .settings-row label { width: 88px; color: var(--fg-dim); flex-shrink: 0; }
+    .settings-row input[type=text], .settings-row select { width: 130px; }
+    .settings-row .hint { font-size: 11px; color: var(--fg-dim); }
+    /* ============ 日志面板 ============ */
+    .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 160px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+    .log-wrap h3 { font-size: 12px; color: var(--fg-dim); font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
     #logBox {
       flex: 1; overflow-y: auto; font-family: Consolas, monospace; font-size: 11.5px;
       background: var(--bg); border-radius: 6px; padding: 8px; line-height: 1.55;
       user-select: text; white-space: pre-wrap; word-break: break-all; color: var(--fg-dim);
     }
-    footer {
-      display: flex; gap: 10px; align-items: center; justify-content: center;
-      padding: 10px; border-top: 1px solid var(--border); background: var(--bg2);
-    }
-    .empty { color: var(--fg-dim); text-align: center; padding: 40px 20px; }
-    .settings-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .settings-row label { width: 88px; color: var(--fg-dim); }
-    .settings-row input { width: 90px; }
-    .settings-row .hint { flex: 1; font-size: 11px; color: var(--fg-dim); }
+    /* ============ 弹窗/Toast ============ */
     dialog {
       background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
       border-radius: 10px; padding: 18px; width: 460px; max-width: 90vw;
     }
     dialog::backdrop { background: rgba(0,0,0,.55); }
     dialog h3 { margin-bottom: 10px; font-size: 14px; }
-    dialog textarea {
-      width: 100%; height: 130px; resize: vertical;
-      background: var(--bg3); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 8px; font-family: Consolas, monospace; font-size: 12px;
-    }
+    dialog textarea { height: 130px; resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
     dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
     .toast {
       position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
       background: var(--bg3); border: 1px solid var(--border); color: var(--fg);
       border-radius: 8px; padding: 8px 18px; font-size: 13px;
       box-shadow: 0 4px 18px rgba(0,0,0,.4); opacity: 0; transition: opacity .25s; pointer-events: none;
-      max-width: 80vw;
+      max-width: 80vw; z-index: 99;
     }
     .toast.show { opacity: 1; }
     .toast.err { border-color: var(--err); }
+    /* 占位页 */
+    .placeholder-hero { text-align: center; padding-top: 100px; }
+    .placeholder-hero .big { font-size: 40px; margin-bottom: 14px; }
+    .placeholder-hero .t { font-size: 15px; margin-bottom: 6px; }
+    .placeholder-hero .d { font-size: 12px; color: var(--fg-dim); }
   </style>
 </head>
 <body>
-  <header>
-    <span class="logo">云亭</span>
-    <nav id="navTabs">
-      <button class="nav-tab active" data-tab="vpn">VPN 加速</button>
-      <button class="nav-tab" data-tab="game" disabled title="开发中">游戏加速</button>
-      <button class="nav-tab" data-tab="online" disabled title="开发中">联机加速</button>
-    </nav>
-    <span class="spacer"></span>
-    <span class="pill" id="pillCore">未连接</span>
-    <span class="pill" id="pillProxy">系统代理：关</span>
-    <label style="display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag;font-size:12px;color:var(--fg-dim)">
-      <input type="checkbox" id="chkAutoProxy" /> 连接时自动开系统代理
-    </label>
-    <button id="btnConnect" class="primary">一键连接</button>
-    <button id="btnDisconnect" class="stop" style="display:none">断开</button>
-  </header>
+  <!-- ============ 左侧导航 ============ -->
+  <aside class="nav">
+    <div class="nav-logo">云 亭</div>
+    <div class="nav-items">
+      <div class="nav-item active" data-page="vpn"><span class="icon">🛡️</span>VPN 加速</div>
+      <div class="nav-item" data-page="subs"><span class="icon">📡</span>订阅管理<span class="badge" id="navSubCount"></span></div>
+      <div class="nav-item" data-page="logs"><span class="icon">📜</span>运行日志</div>
+      <div class="nav-item" data-page="settings"><span class="icon">⚙️</span>设置</div>
+      <div class="nav-item" data-page="game"><span class="icon">🎮</span>游戏加速<span class="badge">开发中</span></div>
+      <div class="nav-item" data-page="online"><span class="icon">🌐</span>联机加速<span class="badge">开发中</span></div>
+    </div>
+    <div class="nav-footer">
+      <div class="status-pill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">未连接</span>
+      </div>
+    </div>
+  </aside>
 
+  <!-- ============ 主区 ============ -->
   <main>
-    <!-- VPN 面板(默认) -->
-    <section class="left" id="tab-vpn">
-      <div class="toolbar">
-        <button id="btnImport">导入节点</button>
-        <button id="btnTestAll">测全部延迟</button>
-        <button id="btnRefresh">刷新</button>
+    <!-- VPN 面板（默认） -->
+    <section class="page active" id="page-vpn">
+      <div class="page-header">
+        <h2>VPN 加速</h2>
+        <span class="sub">国内直连，国外走代理</span>
         <span style="flex:1"></span>
-        <span id="nodeCount" style="color:var(--fg-dim);font-size:12px"></span>
+        <span id="vpnNodeCount" class="sub"></span>
       </div>
-      <div id="nodeList"><div class="empty">暂无节点 —— 点「导入节点」粘贴分享链接，或在右侧添加订阅</div></div>
+      <div class="page-body">
+        <div class="connect-bar">
+          <div class="target">
+            <div class="name" id="connectTarget">未选择节点</div>
+            <div class="desc" id="connectDesc">从下方列表选择，或双击节点直接连接</div>
+          </div>
+          <button id="btnConnect" class="primary">一键连接</button>
+          <button id="btnDisconnect" class="stop" style="display:none">断开</button>
+        </div>
+        <div class="vpn-toolbar">
+          <button id="btnImport">导入节点</button>
+          <button id="btnTestAll">测全部延迟</button>
+          <span style="flex:1"></span>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-dim)">
+            <input type="checkbox" id="chkAutoProxy" /> 连接时自动开系统代理
+          </label>
+        </div>
+        <div class="node-list" id="nodeList">
+          <div class="empty">暂无节点 —— 点「导入节点」粘贴分享链接，或到「订阅管理」添加订阅</div>
+        </div>
+      </div>
     </section>
 
-    <!-- 游戏加速 / 联机加速(占位) -->
-    <section class="left placeholder-tab" id="tab-game" style="display:none">
-      <div class="empty" style="padding-top:120px">
-        <div style="font-size:40px;margin-bottom:14px">🎮</div>
-        <div style="font-size:15px;margin-bottom:6px">游戏加速 · 开发中</div>
-        <div style="font-size:12px;color:var(--fg-dim)">TUN 虚拟网卡 + 进程分流，为指定游戏流量走加速通道（MC / Terraria / 星露谷联机等）</div>
+    <!-- 订阅面板 -->
+    <section class="page" id="page-subs">
+      <div class="page-header">
+        <h2>订阅管理</h2>
+        <span class="sub">拉取订阅后节点自动进入 VPN 面板</span>
       </div>
-    </section>
-    <section class="left placeholder-tab" id="tab-online" style="display:none">
-      <div class="empty" style="padding-top:120px">
-        <div style="font-size:40px;margin-bottom:14px">🌐</div>
-        <div style="font-size:15px;margin-bottom:6px">联机加速 · 开发中</div>
-        <div style="font-size:12px;color:var(--fg-dim)">基于游戏加速的联机房间优化，降低组网延迟</div>
-      </div>
-    </section>
-
-    <aside class="right">
-      <div class="panel">
-        <h3>订阅</h3>
-        <div class="sub-form">
+      <div class="page-body">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
           <input type="text" id="subUrl" placeholder="https://... 订阅链接" />
-          <button id="btnSubAdd">添加</button>
+          <input type="text" id="subName" placeholder="名称（可选）" style="width:140px" />
+          <button id="btnSubAdd" class="primary">添加订阅</button>
         </div>
         <div id="subList"></div>
       </div>
-      <div class="panel">
-        <h3>设置</h3>
-        <div class="settings-row">
-          <label>分流模式</label>
-          <select id="setRouteMode" style="width:120px">
-            <option value="rule">规则（国内直连）</option>
-            <option value="global">全局代理</option>
-          </select>
-          <span class="hint" id="routeModeHint">白名单网站直连</span>
-        </div>
-        <div class="settings-row">
-          <label>本地端口</label>
-          <input type="text" id="setPort" />
-          <span class="hint">mixed 入站</span>
-        </div>
-        <div class="settings-row">
-          <label>API 端口</label>
-          <input type="text" id="setApiPort" />
-          <span class="hint">clash api</span>
-        </div>
-        <div class="settings-row">
-          <button id="btnSysProxy">开系统代理</button>
-          <span class="hint">手动开关（不用内核也行）</span>
+    </section>
+
+    <!-- 日志面板 -->
+    <section class="page" id="page-logs">
+      <div class="page-header">
+        <h2>运行日志</h2>
+        <span class="sub">内核输出 / 操作记录</span>
+        <span style="flex:1"></span>
+        <button id="btnClearLog">清空</button>
+      </div>
+      <div class="page-body" style="display:flex">
+        <div class="log-wrap" style="flex:1">
+          <h3>日志</h3>
+          <div id="logBox"></div>
         </div>
       </div>
-      <div class="panel" id="logPanel">
-        <h3>日志</h3>
-        <div id="logBox"></div>
+    </section>
+
+    <!-- 设置面板 -->
+    <section class="page" id="page-settings">
+      <div class="page-header"><h2>设置</h2></div>
+      <div class="page-body" style="max-width:640px">
+        <div class="settings-card">
+          <h3>分流模式</h3>
+          <div class="settings-row">
+            <label>模式</label>
+            <select id="setRouteMode" style="width:160px">
+              <option value="rule">规则（国内直连）</option>
+              <option value="global">全局代理</option>
+            </select>
+            <span class="hint" id="routeModeHint"></span>
+          </div>
+          <div id="directListPanel">
+            <div class="settings-row">
+              <label>直连白名单</label>
+              <input type="text" id="directAddInput" placeholder="域名，如 openai.com" style="width:160px" />
+              <button id="btnDirectAdd">加入</button>
+              <span class="hint">规则模式下优先级最高</span>
+            </div>
+            <div id="directList" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 6px 98px"></div>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>端口</h3>
+          <div class="settings-row">
+            <label>本地端口</label>
+            <input type="text" id="setPort" />
+            <span class="hint">mixed 入站（默认 7890）</span>
+          </div>
+          <div class="settings-row">
+            <label>API 端口</label>
+            <input type="text" id="setApiPort" />
+            <span class="hint">clash api（默认 9090）</span>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>系统代理</h3>
+          <div class="settings-row">
+            <label>当前状态</label>
+            <span class="hint" id="proxyStateText">检测中…</span>
+          </div>
+          <div class="settings-row">
+            <button id="btnSysProxy">开系统代理</button>
+            <span class="hint">手动开关（不用内核也行）</span>
+          </div>
+        </div>
       </div>
-    </aside>
+    </section>
+
+    <!-- 游戏加速（占位） -->
+    <section class="page" id="page-game">
+      <div class="page-header"><h2>游戏加速</h2><span class="sub">开发中</span></div>
+      <div class="page-body">
+        <div class="placeholder-hero">
+          <div class="big">🎮</div>
+          <div class="t">游戏加速 · 开发中</div>
+          <div class="d">TUN 虚拟网卡 + 进程分流，为指定游戏流量走加速通道（MC / Terraria / 星露谷联机等）</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 联机加速（占位） -->
+    <section class="page" id="page-online">
+      <div class="page-header"><h2>联机加速</h2><span class="sub">开发中</span></div>
+      <div class="page-body">
+        <div class="placeholder-hero">
+          <div class="big">🌐</div>
+          <div class="t">联机加速 · 开发中</div>
+          <div class="d">基于游戏加速的联机房间优化，降低组网延迟</div>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <footer>
-    <span style="color:var(--fg-dim);font-size:12px">选中节点后点「一键连接」；国内直连，国外走代理</span>
-  </footer>
-
+  <!-- 导入弹窗 -->
   <dialog id="dlgImport">
     <h3>导入节点</h3>
     <p style="color:var(--fg-dim);font-size:12px;margin-bottom:8px">每行一条，支持 vless:// vmess:// trojan:// ss:// hysteria2://（hy2://）</p>
@@ -228,13 +326,10 @@
 
   <div class="toast" id="toast"></div>
 
-  <!-- Tauri 版脚本加载顺序: 全局依赖 → 模块加载器 → bridge(暴露 window.yunting) → 旧版 renderer 原样复用 -->
+  <!-- 依赖顺序: js-yaml(parsers 的 clash 解析) → loader → bridge(暴露 window.yunting) → renderer -->
   <script src="lib/js-yaml.min.js"></script>
+  <script>window.jsYaml = window.jsyaml || window.jsYaml</script>
   <script src="lib/loader.js"></script>
-  <script>
-    // 同步加载纯函数模块源码（供 loader eval 用）
-    // fetch 同源资源（CSP connect-src 'self' 允许）
-  </script>
   <script src="lib/bridge.js"></script>
   <script src="renderer.js"></script>
 </body>

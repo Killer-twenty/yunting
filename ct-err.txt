@@ -1,0 +1,191 @@
+   Compiling yt-tool v0.1.0 (E:\Agents\DSH_Projects\yt-tool-tauri\src-tauri)
+warning: function `is_packaged` is never used
+  --> tests\..\src\paths.rs:17:4
+   |
+17 | fn is_packaged() -> bool {
+   |    ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `data_dir` is never used
+  --> tests\..\src\paths.rs:24:8
+   |
+24 | pub fn data_dir() -> PathBuf {
+   |        ^^^^^^^^
+
+warning: function `kernel_exe` is never used
+  --> tests\..\src\paths.rs:64:8
+   |
+64 | pub fn kernel_exe() -> PathBuf {
+   |        ^^^^^^^^^^
+
+warning: struct `KernelState` is never constructed
+  --> tests\..\src\kernel.rs:18:12
+   |
+18 | pub struct KernelState {
+   |            ^^^^^^^^^^^
+
+warning: struct `KernelManager` is never constructed
+  --> tests\..\src\kernel.rs:25:12
+   |
+25 | pub struct KernelManager {
+   |            ^^^^^^^^^^^^^
+
+warning: multiple associated items are never used
+   --> tests\..\src\kernel.rs:34:12
+    |
+ 33 | impl KernelManager {
+    | ------------------ associated items in this implementation
+ 34 |     pub fn new() -> Self {
+    |            ^^^
+...
+ 44 |     pub fn get_state(&self) -> KernelState {
+    |            ^^^^^^^^^
+...
+ 54 |     pub fn take_log_rx(&self) -> mpsc::UnboundedReceiver<String> {
+    |            ^^^^^^^^^^^
+...
+ 60 |     fn log(&self, line: String) {
+    |        ^^^
+...
+ 67 |     pub async fn start(&self, exe: &Path, cfg: &Path, work_dir: &Path) -> Result<u32, String> {
+    |                  ^^^^^
+...
+138 |     fn log_sender(&self) -> mpsc::UnboundedSender<String> {
+    |        ^^^^^^^^^^
+...
+149 |     pub fn stop_blocking(&self) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^
+...
+172 |     pub async fn stop(&self) -> Result<(), String> {
+    |                  ^^^^
+
+warning: trait `HideWin` is never used
+   --> tests\..\src\kernel.rs:213:7
+    |
+213 | trait HideWin {
+    |       ^^^^^^^
+
+warning: function `kill_process_tree` is never used
+   --> tests\..\src\kernel.rs:233:4
+    |
+233 | fn kill_process_tree(pid: u32) {
+    |    ^^^^^^^^^^^^^^^^^
+
+warning: function `wait_api_ready` is never used
+   --> tests\..\src\kernel.rs:261:8
+    |
+261 | pub fn wait_api_ready(port: u16, timeout: Duration) -> Result<(), String> {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `cleanup_orphans` is never used
+   --> tests\..\src\kernel.rs:285:8
+    |
+285 | pub fn cleanup_orphans() -> u32 {
+    |        ^^^^^^^^^^^^^^^
+
+warning: unused variable: `nodes`
+  --> tests\smoke.rs:77:9
+   |
+77 |     let nodes = vec![serde_json::json!({
+   |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_nodes`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `enabled` and `server` are never read
+  --> tests\..\src\sysproxy.rs:32:5
+   |
+31 | struct SavedProxy {
+   |        ---------- fields in this struct
+32 |     enabled: bool,
+   |     ^^^^^^^
+33 |     server: String,
+   |     ^^^^^^
+   |
+   = note: `SavedProxy` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `disable_restore` is never used
+   --> tests\..\src\sysproxy.rs:235:8
+    |
+235 | pub fn disable_restore() -> Result<(), String> {
+    |        ^^^^^^^^^^^^^^^
+
+warning: methods `get_state` and `stop_blocking` are never used
+   --> tests\..\src\kernel.rs:44:12
+    |
+ 33 | impl KernelManager {
+    | ------------------ methods in this implementation
+...
+ 44 |     pub fn get_state(&self) -> KernelState {
+    |            ^^^^^^^^^
+...
+149 |     pub fn stop_blocking(&self) -> Result<(), String> {
+    |            ^^^^^^^^^^^^^
+
+warning: function `is_packaged` is never used
+  --> tests\..\src\paths.rs:17:4
+   |
+17 | fn is_packaged() -> bool {
+   |    ^^^^^^^^^^^
+
+warning: function `kernel_dir` is never used
+  --> tests\..\src\paths.rs:42:8
+   |
+42 | pub fn kernel_dir() -> PathBuf {
+   |        ^^^^^^^^^^
+
+warning: function `load` is never used
+  --> tests\..\src\store.rs:20:4
+   |
+20 | fn load(name: &str) -> Vec<Value> {
+   |    ^^^^
+
+warning: function `save` is never used
+  --> tests\..\src\store.rs:38:4
+   |
+38 | fn save(name: &str, data: &[Value]) {
+   |    ^^^^
+
+warning: function `load_nodes` is never used
+  --> tests\..\src\store.rs:49:8
+   |
+49 | pub fn load_nodes() -> Vec<Value> {
+   |        ^^^^^^^^^^
+
+warning: function `save_nodes` is never used
+  --> tests\..\src\store.rs:52:8
+   |
+52 | pub fn save_nodes(nodes: Vec<Value>) {
+   |        ^^^^^^^^^^
+
+warning: function `load_subs` is never used
+  --> tests\..\src\store.rs:57:8
+   |
+57 | pub fn load_subs() -> Vec<Value> {
+   |        ^^^^^^^^^
+
+warning: function `save_subs` is never used
+  --> tests\..\src\store.rs:60:8
+   |
+60 | pub fn save_subs(subs: Vec<Value>) {
+   |        ^^^^^^^^^
+
+warning: function `is_packaged` is never used
+  --> src\paths.rs:17:4
+   |
+17 | fn is_packaged() -> bool {
+   |    ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `yt-tool` (test "config_compare") generated 3 warnings
+warning: `yt-tool` (test "packaged_flow") generated 10 warnings (3 duplicates)
+warning: `yt-tool` (bin "yt-tool" test) generated 1 warning (1 duplicate)
+warning: `yt-tool` (test "smoke") generated 15 warnings (3 duplicates) (run `cargo fix --test "smoke" -p yt-tool` to apply 1 suggestion)
+warning: `yt-tool` (bin "yt-tool") generated 1 warning
+    Finished `test` profile [optimized + debuginfo] target(s) in 22.67s
+     Running unittests src\main.rs (src-tauri\target\debug\deps\yt_tool-615c99e3416121d3.exe)
+     Running tests\config_compare.rs (src-tauri\target\debug\deps\config_compare-330efdf39718e3de.exe)
+     Running tests\packaged_flow.rs (src-tauri\target\debug\deps\packaged_flow-04fded19484bb57b.exe)
+     Running tests\smoke.rs (src-tauri\target\debug\deps\smoke-2bcc5502a352dba2.exe)

@@ -1,4 +1,5 @@
-// 云亭渲染进程 —— 只经 window.yunting IPC 调用，无业务逻辑
+// 云亭渲染进程 —— 只经 window.yunting bridge 调用，无业务逻辑
+// Tauri 版 UI: 左侧导航 + VPN(默认)/订阅/日志/设置/游戏(占位)/联机(占位)
 const api = window.yunting
 
 const $ = (id) => document.getElementById(id)
@@ -21,19 +22,34 @@ function toast(msg, isErr = false) {
   toastTimer = setTimeout(() => { t.className = 'toast' }, isErr ? 4200 : 2200)
 }
 
-// ---------- 日志 ----------
+// ---------- 日志（节点追加，避免 textContent += 全量重排卡顿）----------
 function log(line) {
   const box = $('logBox')
-  box.textContent += (box.textContent ? '\n' : '') + line
+  const div = document.createElement('div')
+  div.textContent = line
+  box.appendChild(div)
+  // 超量裁剪（保留最近 500 行）
+  while (box.childNodes.length > 500) box.removeChild(box.firstChild)
   box.scrollTop = box.scrollHeight
 }
+
+// ---------- 页面导航 ----------
+function switchPage(name) {
+  document.querySelectorAll('.nav-item').forEach((it) => it.classList.toggle('active', it.dataset.page === name))
+  document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${name}`))
+}
+document.querySelectorAll('.nav-item').forEach((item) => {
+  item.addEventListener('click', () => switchPage(item.dataset.page))
+})
 
 // ---------- 节点列表 ----------
 function renderNodes() {
   const list = $('nodeList')
-  $('nodeCount').textContent = state.nodes.length ? `${state.nodes.length} 个节点` : ''
+  $('vpnNodeCount').textContent = state.nodes.length ? `${state.nodes.length} 个节点` : ''
+  $('navSubCount').textContent = ''
   if (state.nodes.length === 0) {
-    list.innerHTML = '<div class="empty">暂无节点 —— 点「导入节点」粘贴分享链接，或在右侧添加订阅</div>'
+    list.innerHTML = '<div class="empty">暂无节点 —— 点「导入节点」粘贴分享链接，或到「订阅管理」添加订阅</div>'
+    renderConnectTarget()
     return
   }
   list.innerHTML = ''
@@ -75,11 +91,26 @@ function renderNodes() {
     }
     list.appendChild(row)
   }
+  renderConnectTarget()
+}
+
+function renderConnectTarget() {
+  const n = state.nodes.find((x) => x.tag === state.selectedTag)
+  if (n) {
+    $('connectTarget').textContent = n.tag
+    $('connectDesc').textContent = `${n.type} · ${n.server}:${n.server_port}`
+  } else if (state.nodes.length > 0) {
+    $('connectTarget').textContent = '未选择节点'
+    $('connectDesc').textContent = '点击节点选中，双击直接连接'
+  } else {
+    $('connectTarget').textContent = '未选择节点'
+    $('connectDesc').textContent = '从下方列表选择，或双击节点直接连接'
+  }
 }
 
 async function refreshNodes() {
   state.nodes = await api.getNodes()
-  if (state.selectedTag && !state.nodes.find(n => n.tag === state.selectedTag)) state.selectedTag = null
+  if (state.selectedTag && !state.nodes.find((n) => n.tag === state.selectedTag)) state.selectedTag = null
   renderNodes()
 }
 
@@ -87,14 +118,27 @@ async function refreshNodes() {
 function renderSubs(subs) {
   const box = $('subList')
   box.innerHTML = ''
-  if (!subs || subs.length === 0) { box.innerHTML = '<div style="color:var(--fg-dim);font-size:12px;padding:4px 0">无订阅</div>'; return }
+  $('navSubCount').textContent = subs && subs.length ? `${subs.length}` : ''
+  if (!subs || subs.length === 0) {
+    box.innerHTML = '<div class="empty">无订阅 —— 上方粘贴订阅链接添加</div>'
+    return
+  }
   for (const s of subs) {
     const row = document.createElement('div')
     row.className = 'sub-row'
-    const name = document.createElement('span')
+    const name = document.createElement('div')
     name.className = 'name'
-    name.textContent = `${s.name} (${s.nodeCount})`
-    name.title = s.url
+    name.innerHTML = ''
+    const t = document.createElement('div')
+    t.className = 't'
+    t.textContent = s.name
+    const u = document.createElement('div')
+    u.className = 'u'
+    u.textContent = s.url
+    name.append(t, u)
+    const meta = document.createElement('div')
+    meta.className = 'meta'
+    meta.textContent = `${s.nodeCount} 节点`
     const upd = document.createElement('button')
     upd.textContent = '更新'
     upd.onclick = async () => {
@@ -105,29 +149,37 @@ function renderSubs(subs) {
     }
     const del = document.createElement('button')
     del.textContent = '✕'
+    del.title = '删除订阅'
     del.onclick = async () => {
       await api.removeSub(s.id)
       await Promise.all([refreshSubs(), refreshNodes()])
+      toast('订阅已删除')
     }
-    row.append(name, upd, del)
+    row.append(name, meta, upd, del)
     box.appendChild(row)
   }
 }
 
 async function refreshSubs() { renderSubs(await api.getSubs()) }
 
-// ---------- 状态 ----------
+// ---------- 状态（连接栏 + 导航底部状态点 + 设置页）----------
 function renderState(s) {
-  if (s.core) state.core = s.core
-  if (s.proxy) state.proxy = s.proxy
+  if (s && s.core) state.core = s.core
+  if (s && s.proxy) state.proxy = s.proxy
   const running = state.core && state.core.running
-  $('pillCore').textContent = running ? `已连接 · ${state.core.pid}` : '未连接'
-  $('pillCore').className = 'pill' + (running ? ' on' : '')
-  $('pillProxy').textContent = `系统代理：${state.proxy && state.proxy.enabled ? '开' : '关'}`
-  $('pillProxy').className = 'pill' + (state.proxy && state.proxy.enabled ? ' on' : '')
+  // 导航底部状态
+  $('statusDot').className = 'status-dot' + (running ? ' on' : '')
+  $('statusText').textContent = running ? `已连接 · ${state.core.pid}` : '未连接'
+  // VPN 连接按钮
   $('btnConnect').style.display = running ? 'none' : ''
   $('btnDisconnect').style.display = running ? '' : 'none'
-  $('btnSysProxy').textContent = state.proxy && state.proxy.enabled ? '关系统代理' : '开系统代理'
+  // 设置页系统代理状态
+  if (state.proxy) {
+    $('proxyStateText').textContent = state.proxy.enabled
+      ? `已开启 → ${state.proxy.server}${state.proxy.ours ? '' : '（他程序设置）'}`
+      : '已关闭'
+    $('btnSysProxy').textContent = state.proxy.enabled ? '关系统代理' : '开系统代理'
+  }
 }
 
 // ---------- 连接 ----------
@@ -156,7 +208,7 @@ async function testDelay(tag) {
 }
 
 async function testAll() {
-  const tags = state.nodes.map(n => n.tag)
+  const tags = state.nodes.map((n) => n.tag)
   if (tags.length === 0) return toast('没有节点', true)
   if (!(state.core && state.core.running)) return toast('请先连接内核（延迟测试走 clash api）', true)
   toast(`测 ${tags.length} 个节点…`)
@@ -171,6 +223,7 @@ async function loadSettings() {
   $('chkAutoProxy').checked = !!state.settings.autoSystemProxy
   $('setRouteMode').value = state.settings.routeMode || 'rule'
   updateRouteModeHint()
+  renderDirectList()
 }
 
 function updateRouteModeHint() {
@@ -179,6 +232,42 @@ function updateRouteModeHint() {
     global: '所有流量走代理节点',
   }
   $('routeModeHint').textContent = hints[$('setRouteMode').value] || ''
+  $('directListPanel').style.display = $('setRouteMode').value === 'rule' ? '' : 'none'
+}
+
+// ---------- 直连白名单 ----------
+function renderDirectList() {
+  const box = $('directList')
+  box.innerHTML = ''
+  const list = state.settings.directList || []
+  if (list.length === 0) {
+    box.innerHTML = '<span style="font-size:11px;color:var(--fg-dim)">（空 = 仅内置国内规则直连）</span>'
+    return
+  }
+  for (const d of list) {
+    const chip = document.createElement('span')
+    chip.style.cssText = 'background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:2px 8px;font-size:12px;display:inline-flex;align-items:center;gap:4px'
+    const name = document.createElement('span')
+    name.textContent = d
+    const del = document.createElement('span')
+    del.textContent = '✕'
+    del.style.cssText = 'cursor:pointer;color:var(--fg-dim)'
+    del.onmouseenter = () => { del.style.color = 'var(--err)' }
+    del.onmouseleave = () => { del.style.color = 'var(--fg-dim)' }
+    del.onclick = () => saveSettings({ directList: (state.settings.directList || []).filter((x) => x !== d) })
+    chip.append(name, del)
+    box.appendChild(chip)
+  }
+}
+
+$('btnDirectAdd').onclick = () => {
+  const v = $('directAddInput').value.trim().toLowerCase()
+  if (!v) return
+  if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(v)) return toast('域名格式不对，如 openai.com', true)
+  const list = state.settings.directList || []
+  if (list.includes(v)) return toast('已在白名单中')
+  $('directAddInput').value = ''
+  saveSettings({ directList: [...list, v] })
 }
 
 async function saveSettings(extra = {}) {
@@ -192,6 +281,7 @@ async function saveSettings(extra = {}) {
     routeMode: $('setRouteMode').value,
     ...extra,
   })
+  renderDirectList()
   toast('设置已保存（重连后生效）')
 }
 
@@ -219,14 +309,15 @@ $('btnImportOk').onclick = async () => {
 }
 
 $('btnTestAll').onclick = testAll
-$('btnRefresh').onclick = async () => { await Promise.all([refreshNodes(), refreshSubs(), renderState(await api.getState())]) }
 
 $('btnSubAdd').onclick = async () => {
   const url = $('subUrl').value.trim()
   if (!url) return toast('请输入订阅链接', true)
+  const name = $('subName').value.trim() || undefined
   try {
-    await api.addSub(url)
+    await api.addSub(url, name)
     $('subUrl').value = ''
+    $('subName').value = ''
     await Promise.all([refreshSubs(), refreshNodes()])
     toast('订阅添加成功')
   } catch (e) { toast(e.message, true) }
@@ -238,6 +329,8 @@ $('btnSysProxy').onclick = async () => {
   catch (e) { toast(e.message, true) }
 }
 
+$('btnClearLog').onclick = () => { $('logBox').innerHTML = '' }
+
 $('setPort').onchange = () => saveSettings()
 $('setApiPort').onchange = () => saveSettings()
 $('chkAutoProxy').onchange = () => saveSettings()
@@ -247,22 +340,13 @@ $('setRouteMode').onchange = () => { updateRouteModeHint(); saveSettings() }
 api.onLog(log)
 api.onState(renderState)
 
-// ---------- 功能导航(占位 tab) ----------
-document.querySelectorAll('.nav-tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.disabled) return
-    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'))
-    btn.classList.add('active')
-    const tab = btn.dataset.tab
-    document.getElementById('tab-vpn').style.display = tab === 'vpn' ? '' : 'none'
-    document.getElementById('tab-game').style.display = tab === 'game' ? '' : 'none'
-    document.getElementById('tab-online').style.display = tab === 'online' ? '' : 'none'
-  })
-})
-
 // ---------- 初始化 ----------
 ;(async function init() {
   log('[gui] 云亭启动')
+  if (!api) {
+    log('[gui] ⚠️ bridge 未就绪（window.yunting 缺失）—— 检查 tauri withGlobalTauri')
+    return
+  }
   await loadSettings()
   await Promise.all([refreshNodes(), refreshSubs(), renderState(await api.getState())])
 })()

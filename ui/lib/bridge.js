@@ -2,7 +2,13 @@
 // renderer.js 零改动复用；所有调用转发到 Tauri invoke / event。
 // 纯函数（解析/config生成）在本文件内本地执行（parsers.js/configBuilder.js 原样加载），
 // 拉订阅由 Rust 侧 fetch_text 完成后再回前端解析（订阅文本 → parse → 传节点给 Rust）。
-(async function () {
+(function () {
+  // Tauri 2 需开启 withGlobalTauri 才有 window.__TAURI__（tauri.conf.json app.withGlobalTauri: true）
+  if (!window.__TAURI__) {
+    console.error('[bridge] window.__TAURI__ 缺失 —— tauri.conf.json 未开 withGlobalTauri')
+    document.addEventListener('DOMContentLoaded', () => { document.title = '云亭 (bridge 失败: __TAURI__ 缺失)' })
+    return
+  }
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
 
@@ -59,7 +65,5 @@
 
   window.yunting = bridge
   window.__bridgeReady = true
-})().catch((e) => {
-  console.error('[bridge] init failed:', e)
-  document.title = '云亭 (bridge 错误)'
-})
+  console.log('[bridge] window.yunting 就绪')
+})()

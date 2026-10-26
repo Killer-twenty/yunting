@@ -73,9 +73,11 @@ pub struct Settings {
     pub auto_system_proxy: bool,
     #[serde(default = "d_route_mode")]
     pub route_mode: String,
+    #[serde(default)]
+    pub direct_list: Vec<String>,
 }
 
-fn d_mixed_port() -> u16 { 20808 }
+fn d_mixed_port() -> u16 { 7890 }
 fn d_api_port() -> u16 { 9090 }
 fn d_auto_proxy() -> bool { true }
 fn d_route_mode() -> String { "rule".into() }
@@ -83,10 +85,11 @@ fn d_route_mode() -> String { "rule".into() }
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            mixed_port: 20808,
+            mixed_port: 7890,
             clash_api_port: 9090,
             auto_system_proxy: true,
             route_mode: "rule".into(),
+            direct_list: Vec::new(),
         }
     }
 }

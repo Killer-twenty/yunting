@@ -15,6 +15,7 @@ pub fn build_config(
     mixed_port: u16,
     api_port: u16,
     mode: &str,
+    direct_list: &[String],
 ) -> Result<Value, String> {
     if nodes.is_empty() {
         return Err("profile.nodes 不能为空".into());
@@ -63,7 +64,7 @@ pub fn build_config(
             { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": mixed_port },
         ],
         "outbounds": outbounds,
-        "route": build_route(mode),
+        "route": build_route(mode, direct_list),
         "experimental": {
             "clash_api": {
                 "external_controller": format!("127.0.0.1:{api_port}"),
@@ -99,7 +100,10 @@ fn build_dns(mode: &str) -> Value {
     })
 }
 
-fn build_route(mode: &str) -> Value {
+// ---------- route：按 mode 生成分流 ----------
+// mode: 'rule'(默认, 国内直连+白名单直连+国外代理) | 'global'(全部走代理)
+// direct_list: 用户自定义直连域名（后缀匹配，如 "openai.com" 覆盖所有子域；优先级最高）
+fn build_route(mode: &str, direct_list: &[String]) -> Value {
     if mode == "global" {
         return json!({
             "rules": [
@@ -111,15 +115,20 @@ fn build_route(mode: &str) -> Value {
             "auto_detect_interface": true,
         });
     }
+    // rule 模式：白名单优先级最高（在 geosite/geoip 之前）—— 对齐原版 b6f9849
+    let mut rules: Vec<Value> = vec![
+        json!({ "action": "sniff" }),
+        json!({ "protocol": "dns", "action": "hijack-dns" }),
+        json!({ "clash_mode": "Direct", "outbound": "direct" }),
+        json!({ "clash_mode": "Global", "outbound": "proxy" }),
+    ];
+    if !direct_list.is_empty() {
+        rules.push(json!({ "domain_suffix": direct_list, "outbound": "direct" }));
+    }
+    rules.push(json!({ "rule_set": ["geosite-cn"], "outbound": "direct" }));
+    rules.push(json!({ "rule_set": ["geoip-cn"], "outbound": "direct" }));
     json!({
-        "rules": [
-            { "action": "sniff" },
-            { "protocol": "dns", "action": "hijack-dns" },
-            { "clash_mode": "Direct", "outbound": "direct" },
-            { "clash_mode": "Global", "outbound": "proxy" },
-            { "rule_set": ["geosite-cn"], "outbound": "direct" },
-            { "rule_set": ["geoip-cn"], "outbound": "direct" },
-        ],
+        "rules": rules,
         "rule_set": [local_rule_set("geosite-cn"), local_rule_set("geoip-cn")],
         "final": "proxy",
         "auto_detect_interface": true,

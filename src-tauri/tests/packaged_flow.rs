@@ -41,7 +41,7 @@ fn packaged_dir_kernel_full_flow() {
     }
     let selected = fixture["selectedTag"].as_str().map(|s| s.to_string());
 
-    let cfg = configbuilder::build_config(&nodes, &selected, 20808, 9090, "rule").expect("build config");
+    let cfg = configbuilder::build_config(&nodes, &selected, 20808, 9090, "rule", &[]).expect("build config");
     // check 必须过（用打包目录内核 + 打包目录里的 srs —— rule_set path 应指向打包目录的 kernel）
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -57,13 +57,13 @@ fn packaged_dir_kernel_full_flow() {
     println!("[t] 打包目录内 sing-box check ✅（rule 模式 4 节点，local rule-set）");
 
     // global 模式也验一遍
-    let cfg2 = configbuilder::build_config(&nodes, &selected, 20808, 9090, "global").unwrap();
+    let cfg2 = configbuilder::build_config(&nodes, &selected, 20808, 9090, "global", &[]).unwrap();
     std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg2).unwrap()).unwrap();
     kernel::check_config(&exe, &cfg_path).expect("global check failed");
     println!("[t] 打包目录内 sing-box check ✅（global 模式）");
 
     // 真跑一次内核（打包目录内 mixed 20809/api 9091 避端口冲突）→ api 就绪 → 停止
-    let cfg3 = configbuilder::build_config(&nodes, &selected, 20809, 9091, "rule").unwrap();
+    let cfg3 = configbuilder::build_config(&nodes, &selected, 20809, 9091, "rule", &[]).unwrap();
     std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg3).unwrap()).unwrap();
     kernel::check_config(&exe, &cfg_path).expect("run check failed");
     println!("[t] 打包目录 config 三连 check 全过 ✅");

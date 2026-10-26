@@ -1,0 +1,11 @@
+   Compiling yt-tool v0.1.0 (E:\Agents\DSH_Projects\yt-tool-tauri\src-tauri)
+warning: function `is_packaged` is never used
+  --> src\paths.rs:17:4
+   |
+17 | fn is_packaged() -> bool {
+   |    ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `yt-tool` (bin "yt-tool") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1m 40s

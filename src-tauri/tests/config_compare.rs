@@ -25,8 +25,12 @@ fn matches_js_reference_output() {
     let mixed_port = fixture["mixedPort"].as_u64().unwrap() as u16;
     let api_port = fixture["clashApiPort"].as_u64().unwrap() as u16;
     let mode = fixture["mode"].as_str().unwrap_or("rule").to_string();
+    let direct_list: Vec<String> = fixture["directList"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
 
-    let rs_cfg = configbuilder::build_config(&nodes, &selected, mixed_port, api_port, &mode)
+    let rs_cfg = configbuilder::build_config(&nodes, &selected, mixed_port, api_port, &mode, &direct_list)
         .expect("rust build failed");
     let js_cfg: Value = serde_json::from_str(&js_out).unwrap();
 

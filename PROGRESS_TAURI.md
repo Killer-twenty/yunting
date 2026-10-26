@@ -78,14 +78,27 @@
 
 依据：Tauri 壳无 Chromium（进程模型 = 1 个 Rust exe + 1-2 个系统 WebView2 子进程）；Electron 自带完整 Chromium+Node（实测旧版桌面运行 ~200MB 级）。用户桌面可实测对比：任务管理器看「云亭」+「msedgewebview2」合计 vs 旧版「云亭」单进程树。
 
-## 待用户桌面验证（无头会话无法覆盖的部分）
+## 2026-10-26 · 修复轮：桌面双击无反应（用户实测反馈）✅
 
-1. **GUI 启动**：双击 `dist\云亭-portable.exe` → 解压启动 → 窗口出现（深色 UI、节点列表、订阅、日志面板）
-2. **系统代理注册表**：连接后 `reg query` 看 ProxyEnable=1/ProxyServer=127.0.0.1:20808；断开后恢复原值（本会话被 ACL 拦，桌面正常账户无此限制）
-3. **浏览器出墙闭环**：导入 yt-azure-hk 节点 → 一键连接 → 浏览器访问 google.com → 断开恢复
-4. **二开聚焦**：运行中再启动一个 exe 实例 → 已有窗口被聚焦而非新开
+✅ done:
+- **根因 1（SFX）**：便携包配置块被 PowerShell 写入 UTF-8 BOM → 7z SFX 无法识别配置 → 双击静默无动作。改无 BOM 写入修复后，用户改需求为绿色免安装目录（放弃 SFX），交付形态 = `dist\portable\云亭\` 解压即用。
+- **根因 2（真凶，桌面会话复现）**：WebView2 loader 在非 ASCII 用户路径（`C:\Users\Killer丶二十\...`）创建默认用户数据目录 → `os error 5` → tauri panic 0xC0000409。与旧 Electron 工程单实例锁非 ASCII 路径 bug 同族。修复：`main()` 启动即 `set WEBVIEW2_USER_DATA_FOLDER = exe旁 data\webview\`（ASCII 安全 + 便携数据不落 C 盘）。
+- 诊断手段固化：`main-diag.log` 启动步骤日志 + panic 钩子（`云亭\data\main-diag.log`）。
+- 验证：计划任务桌面会话启动 → RunEvent::Ready → 窗口存活 Responding=True，主进程 25.6MB。
 
-## 总结
+## 2026-10-26 · 修复轮 2：bridge 失效 + UI 改版 + 功能补齐（用户实测反馈）✅
+
+✅ done:
+- **bridge 根因**：Tauri 2 默认不注入 `window.__TAURI__`，bridge.js 首行解构 undefined → `addShareLinks` 报"couldn't read properties of undefined"。修复：`tauri.conf.json` 开 `app.withGlobalTauri: true` + bridge 同步初始化（非 async IIFE，失败时 console + title 提示）。
+- **UI 改版**：左侧导航（VPN 加速[默认]/订阅管理/运行日志/设置/游戏加速[占位]/联机加速[占位]）+ 底部连接状态灯；VPN 页连接栏（目标节点+一键连接/断开）；订阅独立页；日志独立页（500 行裁剪防卡）；设置卡片化。
+- **功能补齐（对齐 yunting 最新版 b6f9849/a8234fc）**：
+  - 直连白名单 directList：Settings 加字段 + configbuilder `domain_suffix` 规则（优先级最高，geosite/geoip 之前）+ 设置页 chips 可视化增删
+  - 默认端口 20808 → 7890（与 Clash 习惯一致，对齐原版）
+  - JS configBuilder 同步原版 HEAD 版本（含 directList）
+- 日志渲染改节点追加（旧 textContent += 高频重排会卡 UI）。
+- 验证：Node 22 测全绿；Rust 8 项全绿（config_compare 含 directList 的 Rust/JS 产物依然逐字段一致）。
+
+⏳ next: 用户桌面实测新 UI（导航切换/导入/连接/白名单），实测数据回填内存对比。
 
 M0-M3 全部完成。29 项测试全绿（Node 22 + Rust 7）；产物 9.92MB 便携包；底层全部 Rust 重写并验证。原 yunting 目录零改动（app/ 源码仅从其 git 历史恢复后复制，未回写）。
 
