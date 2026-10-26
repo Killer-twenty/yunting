@@ -10,7 +10,6 @@
 set -e
 
 PORT="${1:-443}"
-REGION="${2:-azure}"
 SB_VER="1.11.15"
 SB=/usr/local/bin/sing-box
 
@@ -97,6 +96,6 @@ echo "== 6/6 完成，分享链接如下 =="
 IP=$(curl -s4 --max-time 8 https://api.ip.sb/ip || curl -s4 --max-time 8 http://ifconfig.me)
 IP=$(echo "$IP" | tr -d '[:space:]')
 echo ""
-echo "vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=${PUB}&sid=${SID}&type=tcp#yt-${REGION}"
+echo "vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=${PUB}&sid=${SID}&type=tcp#yt-$(hostname)"
 echo ""
 echo "云亭 → 导入节点 → 粘贴上面链接 → 一键连接"
