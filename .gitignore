@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+src-tauri/target/
+*.log
+.ecache/
+.ebcache/
+.verify-clean/
+.verify-nsis/
+.verify-portable/
+data/electron/
+data/config.json
+data/cache.db

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "data": [
+    {
+      "tag": "smoke-node",
+      "type": "trojan",
+      "server": "127.0.0.1",
+      "server_port": 18444,
+      "password": "pw-smoke",
+      "tls": {
+        "enabled": true,
+        "server_name": "local.test"
+      },
+      "raw": "trojan://pw-smoke@127.0.0.1:18444?sni=local.test#smoke-node"
+    }
+  ]
+}

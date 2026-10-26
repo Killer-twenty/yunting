@@ -1,0 +1,42 @@
+{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-in",
+      "listen": "::",
+      "listen_port": 443,
+      "users": [
+        {
+          "uuid": "1a4284b5-9ea0-4f23-a4b6-5ee39025ad82",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "www.microsoft.com",
+            "server_port": 443
+          },
+          "private_key": "MPk0sF5ElFFVqdQUO_cgHPeUV-RU8eIl3oM_3rIk9UU",
+          "short_id": [ "a66be5dd872d463a" ]
+        }
+      }
+    }
+  ],
+  "outbounds": [ { "type": "direct", "tag": "direct" } ],
+  "route": {
+    "default_domain_resolver": {
+      "server": "local-dns",
+      "strategy": "prefer_ipv4"
+    }
+  },
+  "dns": {
+    "servers": [
+      { "tag": "local-dns", "type": "local" }
+    ]
+  }
+}

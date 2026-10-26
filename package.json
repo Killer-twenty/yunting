@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.npmjs.org/package.json",
+  "name": "yt-tool-tauri",
+  "productName": "云亭",
+  "version": "0.1.0",
+  "description": "云亭 - Windows 桌面代理加速器 (Tauri 2.x + sing-box)",
+  "author": "YG",
+  "scripts": {
+    "test": "node --test app/test/parsers.test.js app/test/store.test.js app/test/configBuilder.test.js",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "js-yaml": "^4.1.0"
+  }
+}

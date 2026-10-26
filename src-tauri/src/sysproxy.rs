@@ -1,0 +1,243 @@
+// Windows 系统代理 —— 注册表 + WM_SETTINGCHANGE 广播（Rust 重写，windows crate 原生 API）
+// HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
+// 写入策略: windows-rs 直写 → 失败时 UAC 提权兜底（对齐旧版三层策略的语义）
+use std::sync::Mutex;
+
+use serde::Serialize;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, NO_ERROR};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegCreateKeyW, RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_READ, KEY_WRITE, REG_SZ, REG_VALUE_TYPE, REG_DWORD,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+};
+
+const SUBKEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProxyStatus {
+    pub enabled: bool,
+    pub server: String,
+    pub ours: bool,
+}
+
+// 记住开代理前的原值，退出恢复用；None = 原本没开
+static SAVED: Mutex<Option<SavedProxy>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct SavedProxy {
+    enabled: bool,
+    server: String,
+}
+
+fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn from_wide(v: &[u8]) -> String {
+    let u16s: Vec<u16> = v
+        .chunks(2)
+        .filter(|c| c.len() == 2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let end = u16s.iter().position(|&c| c == 0).unwrap_or(u16s.len());
+    String::from_utf16_lossy(&u16s[..end])
+}
+
+/// 打开 HKCU Internet Settings key（不存在则创建；RegCreateKeyW 以 KEY_ALL_ACCESS 打开）
+fn open_key(_access: u32) -> Result<HKEY, String> {
+    let subkey = to_wide(SUBKEY);
+    let mut hkey = HKEY(std::ptr::null_mut());
+    let res = unsafe {
+        RegCreateKeyW(
+            HKEY_CURRENT_USER,
+            PCWSTR(subkey.as_ptr()),
+            &mut hkey,
+        )
+    };
+    if res != NO_ERROR {
+        return Err(format!("RegCreateKeyW error {res:?}"));
+    }
+    Ok(hkey)
+}
+
+/// 直写注册表 SZ 值
+fn reg_set_sz(name: &str, value: &str) -> Result<(), String> {
+    let hkey = open_key(KEY_WRITE.0)?;
+    let name_w = to_wide(name);
+    let data = to_wide(value);
+    let bytes: Vec<u8> = data.iter().flat_map(|u| u.to_le_bytes()).collect();
+    let res = unsafe {
+        RegSetValueExW(hkey, PCWSTR(name_w.as_ptr()), 0, REG_SZ, Some(bytes.as_slice()))
+    };
+    unsafe { let _ = RegCloseKey(hkey); }
+    if res != NO_ERROR {
+        return Err(format!("RegSetValueExW({name}) error {res:?}"));
+    }
+    Ok(())
+}
+
+/// 直写注册表 DWORD 值
+fn reg_set_dword(name: &str, value: u32) -> Result<(), String> {
+    let hkey = open_key(KEY_WRITE.0)?;
+    let name_w = to_wide(name);
+    let res = unsafe {
+        RegSetValueExW(hkey, PCWSTR(name_w.as_ptr()), 0, REG_DWORD, Some(value.to_le_bytes().as_slice()))
+    };
+    unsafe { let _ = RegCloseKey(hkey); }
+    if res != NO_ERROR {
+        return Err(format!("RegSetValueExW({name}) error {res:?}"));
+    }
+    Ok(())
+}
+
+/// 读注册表原始值
+fn reg_query_raw(name: &str) -> Result<Option<(REG_VALUE_TYPE, Vec<u8>)>, String> {
+    let hkey = open_key(KEY_READ.0)?;
+    let name_w = to_wide(name);
+    let mut buf = vec![0u8; 2048];
+    let mut len = buf.len() as u32;
+    let mut vtype = REG_VALUE_TYPE(0);
+    let res = unsafe {
+        RegQueryValueExW(hkey, PCWSTR(name_w.as_ptr()), None, Some(&mut vtype), Some(buf.as_mut_ptr()), Some(&mut len))
+    };
+    unsafe { let _ = RegCloseKey(hkey); }
+    match res {
+        NO_ERROR => {
+            buf.truncate(len as usize);
+            Ok(Some((vtype, buf)))
+        }
+        ERROR_FILE_NOT_FOUND => Ok(None),
+        e => Err(format!("RegQueryValueExW({name}) error {e:?}")),
+    }
+}
+
+fn read_proxy_server() -> String {
+    match reg_query_raw("ProxyServer") {
+        Ok(Some((_, data))) => from_wide(&data),
+        _ => String::new(),
+    }
+}
+
+fn read_proxy_enable() -> bool {
+    match reg_query_raw("ProxyEnable") {
+        Ok(Some((_, data))) => data.first().copied().unwrap_or(0) == 1,
+        _ => false,
+    }
+}
+
+/// 广播 WM_SETTINGCHANGE，让浏览器等立即生效
+fn broadcast_setting_change() {
+    use windows::Win32::Foundation::LPARAM;
+    let param = to_wide("Internet Settings");
+    let lparam = LPARAM(param.as_ptr() as isize);
+    let mut result = 0usize;
+    unsafe {
+        SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            None,
+            lparam,
+            SMTO_ABORTIFHUNG,
+            3000,
+            Some(&mut result),
+        );
+    };
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnableResult {
+    pub server: String,
+    pub via: String,
+}
+
+/// 开系统代理（127.0.0.1:port）。记录原值用于恢复。
+pub fn enable(port: u16) -> Result<EnableResult, String> {
+    let was_enabled = read_proxy_enable();
+    let prev_server = read_proxy_server();
+    {
+        let mut s = SAVED.lock().unwrap();
+        *s = Some(SavedProxy { enabled: was_enabled, server: prev_server });
+    }
+    let server = format!("127.0.0.1:{port}");
+    // 层1: windows-rs 直写
+    let via = match (reg_set_sz("ProxyServer", &server), reg_set_dword("ProxyEnable", 1)) {
+        (Ok(()), Ok(())) => "winreg".to_string(),
+        _ => {
+            // 层2: UAC 提权兜底（用户点"是"）
+            match elevate_set(&server) {
+                Ok(()) => "elevate".to_string(),
+                Err(e) => {
+                    *SAVED.lock().unwrap() = None;
+                    return Err(format!("系统代理写入失败(已试 winreg/管理员两种方式): {e}"));
+                }
+            }
+        }
+    };
+    broadcast_setting_change();
+    Ok(EnableResult { server, via })
+}
+
+/// UAC 提权写入兜底
+fn elevate_set(server: &str) -> Result<(), String> {
+    use std::process::Command;
+    let ps = format!(
+        "Start-Process cmd -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '/c','reg add \"{SUBKEY}\" /v ProxyServer /t REG_SZ /d \"{server}\" /f && reg add \"{SUBKEY}\" /v ProxyEnable /t REG_DWORD /d 1 /f'"
+    );
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// 关系统代理。restore=true 且之前记过原值 → 恢复原值而非简单关闭。
+pub fn disable_restore() -> Result<(), String> {
+    let saved = SAVED.lock().unwrap().clone();
+    match saved {
+        Some(s) if s.enabled && !s.server.is_empty() => {
+            let _ = reg_set_sz("ProxyServer", &s.server);
+            let _ = reg_set_dword("ProxyEnable", 1);
+        }
+        _ => {
+            let _ = reg_set_dword("ProxyEnable", 0);
+        }
+    }
+    *SAVED.lock().unwrap() = None;
+    broadcast_setting_change();
+    Ok(())
+}
+
+/// 强制关闭（不恢复原值）
+pub fn disable_force() {
+    let _ = reg_set_dword("ProxyEnable", 0);
+    *SAVED.lock().unwrap() = None;
+    broadcast_setting_change();
+}
+
+pub fn status() -> ProxyStatus {
+    let enabled = read_proxy_enable();
+    let server = read_proxy_server();
+    let ours = enabled && server.starts_with("127.0.0.1:");
+    ProxyStatus { enabled, server, ours }
+}
+
+/// 启动残留检测: 系统代理指向 port → 自动清掉（启动时内核必未运行）。返回是否执行了清理。
+pub fn cleanup_stale(port: u16) -> bool {
+    let s = status();
+    if !s.enabled {
+        return false;
+    }
+    if s.server == format!("127.0.0.1:{port}") {
+        disable_force();
+        return true;
+    }
+    false
+}
