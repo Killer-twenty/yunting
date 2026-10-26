@@ -1,10 +1,14 @@
 // sing-box 内核进程管理（Rust 重写，tokio::process::Command）
 // 职责: config check → spawn → 日志通道 → 优雅停止（杀进程树）→ 孤儿清理
 // 日志经 mpsc 通道交给调用方（main.rs 转发到 WebView 事件）
+//
+// 状态设计: running/pid/exit_code 抽成 Arc<KernelStatus>，可无锁同步读取。
+// —— 命令层需要在 async 上下文和非 runtime 上下文（窗口事件）都能读状态，
+//    绝不能对 tokio::sync::Mutex 调 blocking_lock（会 panic：Cannot block the current thread from within a runtime）
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -15,50 +19,78 @@ use crate::paths::kernel_exe;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct KernelState {
+pub struct KernelSnapshot {
     pub running: bool,
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
     pub phase: String,
 }
 
+/// 内核运行时状态（内部全是原子量 / std Mutex，任何线程都可同步读取）
+pub struct KernelStatus {
+    running: AtomicBool,
+    pid: Mutex<Option<u32>>,
+    exit_code: Mutex<Option<i32>>,
+}
+
+impl KernelStatus {
+    pub fn new() -> Self {
+        Self {
+            running: AtomicBool::new(false),
+            pid: Mutex::new(None),
+            exit_code: Mutex::new(None),
+        }
+    }
+
+    pub fn snapshot(&self) -> KernelSnapshot {
+        let running = self.running.load(Ordering::SeqCst);
+        KernelSnapshot {
+            running,
+            pid: *self.pid.lock().unwrap_or_else(|e| e.into_inner()),
+            exit_code: *self.exit_code.lock().unwrap_or_else(|e| e.into_inner()),
+            phase: if running { "running".into() } else { "stopped".into() },
+        }
+    }
+
+    fn set_running(&self, running: bool, pid: Option<u32>) {
+        self.running.store(running, Ordering::SeqCst);
+        *self.pid.lock().unwrap_or_else(|e| e.into_inner()) = pid;
+    }
+
+    fn set_exit_code(&self, code: Option<i32>) {
+        *self.exit_code.lock().unwrap_or_else(|e| e.into_inner()) = code;
+    }
+}
+
 pub struct KernelManager {
     child: Mutex<Option<Child>>,
-    pid: Mutex<Option<u32>>,
-    running: AtomicBool,
-    exit_code: Mutex<Option<i32>>,
+    status: Arc<KernelStatus>,
     log_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
 }
 
 impl KernelManager {
-    pub fn new() -> Self {
-        Self {
-            child: Mutex::new(None),
-            pid: Mutex::new(None),
-            running: AtomicBool::new(false),
-            exit_code: Mutex::new(None),
-            log_tx: Mutex::new(None),
-        }
-    }
-
-    pub fn get_state(&self) -> KernelState {
-        KernelState {
-            running: self.running.load(Ordering::SeqCst),
-            pid: *self.pid.lock().unwrap(),
-            exit_code: *self.exit_code.lock().unwrap(),
-            phase: if self.running.load(Ordering::SeqCst) { "running".into() } else { "stopped".into() },
-        }
+    /// 返回 manager 与状态句柄（状态句柄可交给命令层无锁读取）
+    pub fn new() -> (Self, Arc<KernelStatus>) {
+        let status = Arc::new(KernelStatus::new());
+        (
+            Self {
+                child: Mutex::new(None),
+                status: status.clone(),
+                log_tx: Mutex::new(None),
+            },
+            status,
+        )
     }
 
     /// 注册日志接收端（main.rs 拿 rx 转发到 WebView）。重复调用覆盖旧通道。
     pub fn take_log_rx(&self) -> mpsc::UnboundedReceiver<String> {
         let (tx, rx) = mpsc::unbounded_channel();
-        *self.log_tx.lock().unwrap() = Some(tx);
+        *self.log_tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
         rx
     }
 
     fn log(&self, line: String) {
-        if let Some(tx) = self.log_tx.lock().unwrap().as_ref() {
+        if let Some(tx) = self.log_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             let _ = tx.send(line);
         }
     }
@@ -66,7 +98,7 @@ impl KernelManager {
     /// 启动内核。日志走通道；状态本函数返回即视为 running（就绪等待由调用方做）。
     pub async fn start(&self, exe: &Path, cfg: &Path, work_dir: &Path) -> Result<u32, String> {
         {
-            let g = self.child.lock().unwrap();
+            let g = self.child.lock().unwrap_or_else(|e| e.into_inner());
             if g.is_some() {
                 return Err("内核已在运行".into());
             }
@@ -84,7 +116,6 @@ impl KernelManager {
             .kill_on_drop(true); // guard 丢失时自动杀进程，防孤儿
         let mut child = cmd.spawn().map_err(|e| format!("内核启动失败: {e}"))?;
         let pid = child.id().unwrap_or(0);
-        *self.pid.lock().unwrap() = Some(pid);
         self.log(format!("内核已启动 pid={pid}"));
 
         // stdout / stderr 逐行转发到日志通道
@@ -129,14 +160,14 @@ impl KernelManager {
             });
         }
 
-        self.running.store(true, Ordering::SeqCst);
-        *self.exit_code.lock().unwrap() = None;
-        *self.child.lock().unwrap() = Some(child);
+        self.status.set_exit_code(None);
+        self.status.set_running(true, Some(pid));
+        *self.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
         Ok(pid)
     }
 
     fn log_sender(&self) -> mpsc::UnboundedSender<String> {
-        if let Some(tx) = self.log_tx.lock().unwrap().as_ref() {
+        if let Some(tx) = self.log_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             tx.clone()
         } else {
             // 无订阅者: 丢弃日志
@@ -148,12 +179,11 @@ impl KernelManager {
     /// 停止（同步版，供退出钩子调用）: 直接 taskkill /T /F 杀进程树
     pub fn stop_blocking(&self) -> Result<(), String> {
         let pid = {
-            let mut g = self.child.lock().unwrap();
+            let mut g = self.child.lock().unwrap_or_else(|e| e.into_inner());
             match g.take() {
                 Some(child) => child.id().unwrap_or(0),
                 None => {
-                    self.running.store(false, Ordering::SeqCst);
-                    *self.pid.lock().unwrap() = None;
+                    self.status.set_running(false, None);
                     return Ok(());
                 }
             }
@@ -162,8 +192,7 @@ impl KernelManager {
             self.log(format!("退出清理: taskkill /T /F pid={pid}"));
             kill_process_tree(pid);
         }
-        self.running.store(false, Ordering::SeqCst);
-        *self.pid.lock().unwrap() = None;
+        self.status.set_running(false, None);
         Ok(())
     }
 
@@ -171,12 +200,11 @@ impl KernelManager {
     /// （guard 不跨 await：同步块内 take child，drop guard 后再异步等待）
     pub async fn stop(&self) -> Result<(), String> {
         let mut child = {
-            let mut child_g = self.child.lock().unwrap();
+            let mut child_g = self.child.lock().unwrap_or_else(|e| e.into_inner());
             match child_g.take() {
                 Some(c) => c,
                 None => {
-                    self.running.store(false, Ordering::SeqCst);
-                    *self.pid.lock().unwrap() = None;
+                    self.status.set_running(false, None);
                     return Ok(());
                 }
             }
@@ -187,7 +215,9 @@ impl KernelManager {
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    self.log(format!("内核退出 code={}", status.code().unwrap_or(-1)));
+                    let code = status.code();
+                    self.log(format!("内核退出 code={}", code.unwrap_or(-1)));
+                    self.status.set_exit_code(code);
                     break;
                 }
                 Ok(None) => {
@@ -204,8 +234,7 @@ impl KernelManager {
             }
         }
         let _ = child.wait().await;
-        self.running.store(false, Ordering::SeqCst);
-        *self.pid.lock().unwrap() = None;
+        self.status.set_running(false, None);
         Ok(())
     }
 }

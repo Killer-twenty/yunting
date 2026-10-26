@@ -197,11 +197,14 @@ function renderState(s) {
 // ---------- 连接 ----------
 async function connect() {
   const btn = $('btnConnect')
+  if (btn.disabled) return
   btn.disabled = true
   btn.textContent = '连接中…'
+  log('[gui] 开始连接：生成配置 → 校验内核 → 等待 clash api 就绪')
   try {
     await api.connect({ selectedTag: state.selectedTag })
     toast('已连接')
+    log('[gui] 连接完成')
   } catch (e) {
     const m = errText(e)
     toast(m, true)
@@ -209,7 +212,7 @@ async function connect() {
   } finally {
     btn.disabled = false
     btn.textContent = '一键连接'
-    renderState(await api.getState())
+    try { renderState(await api.getState()) } catch (e) { log(`[gui] 状态刷新失败: ${errText(e)}`) }
   }
 }
 
@@ -317,14 +320,26 @@ async function saveSettings(extra = {}) {
 $('btnConnect').onclick = connect
 
 $('btnDisconnect').onclick = async () => {
-  $('btnDisconnect').disabled = true
-  try { await api.disconnect(); toast('已断开') }
-  catch (e) {
+  const btn = $('btnDisconnect')
+  if (btn.disabled) return
+  btn.disabled = true
+  const old = btn.textContent
+  btn.textContent = '正在断开…'
+  toast('正在断开，请稍候…')
+  log('[gui] 开始断开：停止内核 + 恢复系统代理')
+  try {
+    await api.disconnect()
+    toast('已断开')
+    log('[gui] 断开完成')
+  } catch (e) {
     const m = errText(e)
     toast(m, true)
     log(`[gui] 断开失败: ${m}`)
+  } finally {
+    btn.disabled = false
+    btn.textContent = old || '断开'
+    try { renderState(await api.getState()) } catch (e) { log(`[gui] 状态刷新失败: ${errText(e)}`) }
   }
-  finally { $('btnDisconnect').disabled = false; renderState(await api.getState()) }
 }
 
 $('btnImport').onclick = () => { $('importText').value = ''; $('dlgImport').showModal() }

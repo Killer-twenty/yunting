@@ -196,6 +196,7 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
 }
 
 /// UAC 提权写入兜底（-EncodedCommand 绕引号转义问题；一次提权写两条注册表值）
+/// CREATE_NO_WINDOW: 隐藏 powershell 自身窗口（否则每次连接弹黑框）
 fn elevate_set(server: &str) -> Result<(), String> {
     use std::process::Command;
     let encoded = {
@@ -205,10 +206,15 @@ fn elevate_set(server: &str) -> Result<(), String> {
         let utf16: Vec<u8> = ps_inner.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
         base64_encode(&utf16)
     };
-    let out = Command::new("powershell")
-        .args(["-NoProfile", "-EncodedCommand", &encoded])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-EncodedCommand", &encoded])
+        .stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let out = cmd.output().map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }

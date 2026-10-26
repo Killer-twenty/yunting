@@ -146,6 +146,27 @@ fn data_dir_fallback_when_appdata_unwritable() {
     println!("[t] data_dir fallback ✅ → {}", d.display());
 }
 
+#[test]
+fn kernel_status_readable_from_any_context() {
+    // 回归: broadcast_state/core_state 曾在 async runtime 内对 tokio Mutex 调 blocking_lock
+    // → panic "Cannot block the current thread from within a runtime"，导致连接报错/断开卡死。
+    // 状态句柄必须能在 runtime 上下文与非 runtime 上下文都无锁读取。
+    let (_km, status) = kernel::KernelManager::new();
+    // 非 runtime 上下文
+    let s = status.snapshot();
+    assert!(!s.running);
+    assert_eq!(s.pid, None);
+    assert_eq!(s.phase, "stopped");
+    // runtime 上下文（这里若内部用 tokio Mutex 且 blocking_lock 就会 panic）
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    rt.block_on(async {
+        let s2 = status.snapshot();
+        assert!(!s2.running);
+        println!("[t] status snapshot in runtime ctx: {:?}", s2);
+    });
+    println!("[t] kernel status readable from any context ✅");
+}
+
 /// 测试工作目录: 项目 target/smoke-tmp/<name>（temp_dir 在受限会话+非 ASCII 用户名下拒写）
 fn smoke_tmp_dir(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("smoke-tmp").join(name)
@@ -191,7 +212,7 @@ async fn kernel_lifecycle() {
     std::fs::write(&cfg_path, serde_json::to_vec_pretty(&cfg).unwrap()).unwrap();
     kernel::check_config(&exe, &cfg_path).expect("check failed");
 
-    let km = kernel::KernelManager::new();
+    let (km, kstatus) = kernel::KernelManager::new();
     let mut rx = km.take_log_rx();
     let pid = km.start(&exe, &cfg_path, &dir).await.expect("start failed");
     println!("[t] kernel started pid={pid}");
