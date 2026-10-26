@@ -36,14 +36,20 @@ if (Test-Path $arc) { Remove-Item $arc -Force }
 "packed: $((Get-Item $arc).Length / 1MB) MB"
 
 # 3) SFX 配置（双击 → 解压到当前目录 → 直接启动）
+# ⚠️ 必须 UTF-8 无 BOM —— 7z SFX 要求首字节是 ";!@Install@!UTF-8!"，BOM 会让配置块整体失效（双击无反应）
 $sfxCfg = Join-Path $work 'sfx-config.txt'
-@"
+$cfgText = @"
 ;!@Install@!UTF-8!
 Title="云亭"
 BeginPrompt="解压云亭便携版到当前目录并启动？"
 RunProgram="云亭.exe"
+ExtractTitle="云亭 · 首次解压"
+ExtractDialogText="正在解压云亭（仅首次运行需要）..."
+GUIFlags="4+8+64+256"
+Progress="yes"
 ;!@InstallEnd@!
-"@ | Set-Content $sfxCfg -Encoding utf8
+"@
+[System.IO.File]::WriteAllText($sfxCfg, $cfgText, (New-Object System.Text.UTF8Encoding $false))
 
 # 4) 二进制拼接 sfx + config + 7z → portable.exe
 if (Test-Path $outexe) { Remove-Item $outexe -Force }
