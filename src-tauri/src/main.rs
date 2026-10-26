@@ -428,18 +428,42 @@ async fn fetch_text(url: String) -> Result<String, String> {
     r.text().await.map_err(|e| e.to_string())
 }
 
+/// 启动诊断日志（exe 旁 data/main-diag.log）—— 桌面排障用（GUI 子系统无 stderr）
+pub fn diag(msg: &str) {
+    use std::io::Write;
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_default();
+    let _ = std::fs::create_dir_all(exe_dir.join("data"));
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(exe_dir.join("data").join("main-diag.log"))
+    {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 // ============================================================
 // 入口
 // ============================================================
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    diag("run: entry (startup cleanup begins)");
     // 启动残留清理（孤儿 sing-box + 系统代理残留）
     let orphan = kernel::cleanup_orphans();
+    diag(&format!("run: orphan cleanup done ({orphan})"));
     let settings = load_settings();
     let cleaned_stale = sysproxy::cleanup_stale(settings.mixed_port);
+    diag(&format!("run: stale proxy cleanup done ({cleaned_stale})"));
     let boot_note = (orphan, cleaned_stale);
 
-    tauri::Builder::default()
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         // 单实例锁: 二开时聚焦已有窗口（替代旧版 requestSingleInstanceLock）
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -469,30 +493,51 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(move |app, event| {
-            // 首窗创建后把启动清理结果打给日志面板
-            if let tauri::RunEvent::Ready = event {
-                if let Some(win) = app.get_webview_window("main") {
-                    let (orphan, stale) = boot_note;
-                    if orphan > 0 {
-                        let _ = win.emit("log", format!("[{}] 启动时清理了 {orphan} 个残留 sing-box 进程", now_hms()));
-                    }
-                    if stale {
-                        let _ = win.emit("log", format!("[{}] 检测到系统代理残留（上次异常退出），已自动清除", now_hms()));
-                    }
+        .expect("error while building tauri application");
+    diag("run: tauri app built ok（窗口已创建，进入事件循环）");
+    built.run(move |app, event| {
+        // 首窗创建后把启动清理结果打给日志面板
+        if let tauri::RunEvent::Ready = event {
+            diag("run: RunEvent::Ready（事件循环已就绪，窗口应已创建）");
+            if let Some(win) = app.get_webview_window("main") {
+                let (orphan, stale) = boot_note;
+                if orphan > 0 {
+                    let _ = win.emit("log", format!("[{}] 启动时清理了 {orphan} 个残留 sing-box 进程", now_hms()));
+                }
+                if stale {
+                    let _ = win.emit("log", format!("[{}] 检测到系统代理残留（上次异常退出），已自动清除", now_hms()));
                 }
             }
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                let _ = sysproxy::disable_restore();
-                if let Some(state) = app.try_state::<KernelState>() {
-                    let km = state.0.blocking_lock();
-                    let _ = km.stop_blocking();
-                }
+        }
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            let _ = sysproxy::disable_restore();
+            if let Some(state) = app.try_state::<KernelState>() {
+                let km = state.0.blocking_lock();
+                let _ = km.stop_blocking();
             }
-        });
+        }
+    });
 }
 
 fn main() {
+    // WebView2 用户数据目录重定向到 exe 旁（ASCII 安全路径）
+    // —— 本机用户名非 ASCII（C:\Users\Killer丶二十\...），WebView2 loader 对该路径返回
+    //    os error 5（拒绝访问），与旧 Electron 工程的单实例锁 bug 同族。
+    //    固化到 exe 旁 data\webview\，便携版数据不落 C 盘、迁移不丢。
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let wv = dir.join("data").join("webview");
+            if std::fs::create_dir_all(&wv).is_ok() {
+                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &wv);
+            }
+        }
+    }
+    diag("launch: main entered");
+    // 兜底 panic 钩子 —— panic 消息也写进诊断日志
+    std::panic::set_hook(Box::new(move |info| {
+        diag(&format!("PANIC: {info}"));
+    }));
+    diag("launch: calling run()");
     run();
+    diag("launch: run() returned");
 }
