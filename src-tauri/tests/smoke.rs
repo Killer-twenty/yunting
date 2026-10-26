@@ -123,6 +123,29 @@ fn configbuilder_rejects_out_of_range_port() {
     println!("[t] configbuilder port range ✅");
 }
 
+#[test]
+fn data_dir_fallback_when_appdata_unwritable() {
+    // 受限会话（DSH 无头）下 %APPDATA%\yt-tool 目录存在但拒写（os error 5）
+    // → 解析应回退 exe 旁 data/，否则所有保存静默失败（用户报导入红框）
+    // 模拟不可写 APPDATA: 让 yt-tool 是个文件 → create_dir_all 必失败
+    let bogus = smoke_tmp_dir("appdata-bogus");
+    let _ = std::fs::remove_dir_all(&bogus);
+    std::fs::create_dir_all(&bogus).unwrap();
+    let blocker = bogus.join("yt-tool");
+    std::fs::write(&blocker, b"file not dir").unwrap();
+    std::env::set_var("APPDATA", &bogus);
+    std::env::set_var("YT_DATA_DIR", "");
+    let d = paths::resolve_data_dir();
+    let expected_bad = bogus.join("yt-tool");
+    assert_ne!(d, expected_bad, "must fall back when APPDATA\\yt-tool is unusable");
+    // 回退目录必须可写
+    assert!(paths::resolve_data_dir() == d, "resolve must be deterministic");
+    let probe = d.join(".wprobe");
+    assert!(std::fs::write(&probe, b"x").is_ok(), "fallback dir must be writable");
+    let _ = std::fs::remove_file(&probe);
+    println!("[t] data_dir fallback ✅ → {}", d.display());
+}
+
 /// 测试工作目录: 项目 target/smoke-tmp/<name>（temp_dir 在受限会话+非 ASCII 用户名下拒写）
 fn smoke_tmp_dir(name: &str) -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("smoke-tmp").join(name)

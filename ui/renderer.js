@@ -22,6 +22,14 @@ function toast(msg, isErr = false) {
   toastTimer = setTimeout(() => { t.className = 'toast' }, isErr ? 4200 : 2200)
 }
 
+// Tauri 2 invoke 失败时 reject 的是字符串而非 Error，e.message 为 undefined 会导致红框无文字
+function errText(e) {
+  if (e == null) return '未知错误'
+  if (typeof e === 'string') return e
+  if (typeof e.message === 'string' && e.message) return e.message
+  return String(e)
+}
+
 // ---------- 日志（节点追加，避免 textContent += 全量重排卡顿）----------
 function log(line) {
   const box = $('logBox')
@@ -144,7 +152,11 @@ function renderSubs(subs) {
     upd.onclick = async () => {
       upd.disabled = true
       try { await api.updateSub(s.id); await refreshNodes(); toast('订阅已更新') }
-      catch (e) { toast(e.message, true) }
+      catch (e) {
+        const m = errText(e)
+        toast(m, true)
+        log(`[gui] 订阅更新失败: ${m}`)
+      }
       finally { upd.disabled = false; await refreshSubs() }
     }
     const del = document.createElement('button')
@@ -191,8 +203,9 @@ async function connect() {
     await api.connect({ selectedTag: state.selectedTag })
     toast('已连接')
   } catch (e) {
-    toast(e.message, true)
-    log(`[gui] 连接失败: ${e.message}`)
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 连接失败: ${m}`)
   } finally {
     btn.disabled = false
     btn.textContent = '一键连接'
@@ -284,14 +297,20 @@ async function saveSettings(extra = {}) {
   const clashApiPort = parseInt($('setApiPort').value, 10)
   if (!(mixedPort > 0 && mixedPort < 65536)) return toast('本地端口无效', true)
   if (!(clashApiPort > 0 && clashApiPort < 65536)) return toast('API 端口无效', true)
-  state.settings = await api.saveSettings({
-    mixedPort, clashApiPort,
-    autoSystemProxy: $('chkAutoProxy').checked,
-    routeMode: $('setRouteMode').value,
-    ...extra,
-  })
-  renderDirectList()
-  toast('设置已保存（重连后生效）')
+  try {
+    state.settings = await api.saveSettings({
+      mixedPort, clashApiPort,
+      autoSystemProxy: $('chkAutoProxy').checked,
+      routeMode: $('setRouteMode').value,
+      ...extra,
+    })
+    renderDirectList()
+    toast('设置已保存（重连后生效）')
+  } catch (e) {
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 设置保存失败: ${m}`)
+  }
 }
 
 // ---------- 事件绑定 ----------
@@ -300,7 +319,11 @@ $('btnConnect').onclick = connect
 $('btnDisconnect').onclick = async () => {
   $('btnDisconnect').disabled = true
   try { await api.disconnect(); toast('已断开') }
-  catch (e) { toast(e.message, true) }
+  catch (e) {
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 断开失败: ${m}`)
+  }
   finally { $('btnDisconnect').disabled = false; renderState(await api.getState()) }
 }
 
@@ -314,7 +337,11 @@ $('btnImportOk').onclick = async () => {
     $('dlgImport').close()
     await refreshNodes()
     toast(`导入成功：新增 ${r.added}，共 ${r.total}`)
-  } catch (e) { toast(e.message, true) }
+  } catch (e) {
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 导入失败: ${m}`)
+  }
 }
 
 $('btnTestAll').onclick = testAll
@@ -329,13 +356,21 @@ $('btnSubAdd').onclick = async () => {
     $('subName').value = ''
     await Promise.all([refreshSubs(), refreshNodes()])
     toast('订阅添加成功')
-  } catch (e) { toast(e.message, true) }
+  } catch (e) {
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 订阅添加失败: ${m}`)
+  }
 }
 
 $('btnSysProxy').onclick = async () => {
   const on = !(state.proxy && state.proxy.enabled)
   try { renderState({ proxy: await api.setSystemProxy(on) }) }
-  catch (e) { toast(e.message, true) }
+  catch (e) {
+    const m = errText(e)
+    toast(m, true)
+    log(`[gui] 系统代理失败: ${m}`)
+  }
 }
 
 $('btnClearLog').onclick = () => { $('logBox').innerHTML = '' }

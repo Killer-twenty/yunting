@@ -13,27 +13,46 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
-pub fn data_dir() -> PathBuf {
-    use std::sync::OnceLock;
-    static CACHE: OnceLock<PathBuf> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        if let Ok(override_dir) = std::env::var("YT_DATA_DIR") {
+/// 目录真实可写探测（create_dir_all 对已存在目录不验证可写性，必须实测）
+fn is_writable_dir(dir: &Path) -> bool {
+    let probe = dir.join(".write-probe");
+    match std::fs::write(&probe, b"x") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// 解析数据目录（无缓存纯函数，测试直接测这个）
+/// 1. YT_DATA_DIR 环境变量（显式覆盖）
+/// 2. %APPDATA%\yt-tool —— 必须真实可写才采用（受限会话/ACL 异常时 create_dir_all 会假成功）
+/// 3. exe 旁 data/
+pub fn resolve_data_dir() -> PathBuf {
+    if let Ok(override_dir) = std::env::var("YT_DATA_DIR") {
+        if !override_dir.trim().is_empty() {
             let d = PathBuf::from(override_dir);
             let _ = std::fs::create_dir_all(&d);
             return d;
         }
-        if let Ok(ad) = std::env::var("APPDATA") {
-            let dir = Path::new(&ad).join("yt-tool");
-            if std::fs::create_dir_all(&dir).is_ok() && dir.is_dir() {
-                return dir;
-            }
+    }
+    if let Ok(ad) = std::env::var("APPDATA") {
+        let dir = Path::new(&ad).join("yt-tool");
+        if std::fs::create_dir_all(&dir).is_ok() && dir.is_dir() && is_writable_dir(&dir) {
+            return dir;
         }
-        // 兜底: exe 旁 data/
-        let d = exe_dir().join("data");
-        let _ = std::fs::create_dir_all(&d);
-        d
-    })
-    .clone()
+    }
+    // 兜底: exe 旁 data/
+    let d = exe_dir().join("data");
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+pub fn data_dir() -> PathBuf {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<PathBuf> = OnceLock::new();
+    CACHE.get_or_init(resolve_data_dir).clone()
 }
 
 pub fn kernel_dir() -> PathBuf {
