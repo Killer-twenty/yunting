@@ -1,7 +1,7 @@
 #!/bin/bash
-# 云亭服务端一键部署脚本（VLESS-Reality, sing-box 1.11.15 官方完整版）
+# yunting 服务端一键部署脚本（VLESS-Reality, sing-box 1.11.15 官方完整版）
 # 在全新 Ubuntu/Debian VPS 上以 root 运行: bash server-deploy.sh [端口]
-# 产出: 直接可粘进云亭的 vless:// 链接
+# 产出: 直接可粘进 yunting 的 vless:// 链接
 #
 # 配方来自 2026-10-25 实战验证:
 #   - 必须用官方完整版 sing-box(带 with_reality_server 标签; 一键脚本的精简编译版会导致认证永远失败)
@@ -98,4 +98,4 @@ IP=$(echo "$IP" | tr -d '[:space:]')
 echo ""
 echo "vless://${UUID}@${IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.cloudflare.com&fp=chrome&pbk=${PUB}&sid=${SID}&type=tcp#yt-$(hostname)"
 echo ""
-echo "云亭 → 导入节点 → 粘贴上面链接 → 一键连接"
+echo "yunting → 导入节点 → 粘贴上面链接 → 一键连接"

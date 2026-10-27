@@ -14,7 +14,7 @@ fn packaged_dir_kernel_full_flow() {
         .unwrap()
         .join("dist")
         .join("portable")
-        .join("云亭")
+        .join("yunting")
         .join("kernel")
         .join("sing-box.exe");
     if !exe.exists() {
@@ -48,7 +48,7 @@ fn packaged_dir_kernel_full_flow() {
         .unwrap()
         .join("dist")
         .join("portable")
-        .join("云亭")
+        .join("yunting")
         .join("data");
     std::fs::create_dir_all(&dir).unwrap();
     let cfg_path = dir.join("config.json");

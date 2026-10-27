@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! 云亭 Tauri 版主入口
+//! yunting Tauri 版主入口
 //! 架构:
 //!   ui/                —— 复用旧版原生 JS 前端 + 纯函数模块(parsers/configBuilder)
 //!   src-tauri/src/     —— Rust: paths/store/kernel/sysproxy/clashapi/configbuilder
-//! 数据: %APPDATA%\yt-tool（与 Electron 版数据隔离）；不可写时兜底 exe 旁 data/
+//! 数据: %APPDATA%\yunting（与 Electron 版数据隔离）；不可写时兜底 exe 旁 data/
 //! 内核: 打包态 exe 旁 kernel/；开发态项目 kernel/
 
 mod clashapi;
@@ -293,6 +293,9 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let cfg_path = dir.join("config.json");
     let cfg_bytes = serde_json::to_vec_pretty(&cfg).map_err(|e| format!("config 序列化失败: {e}"))?;
+    let cfg_json = serde_json::to_string(&cfg).map_err(|e| format!("最终 config 序列化失败: {e}"))?;
+    diag(&format!("Final Config: {cfg_json}"));
+    log_line(&app, format!("[core] Final Config: {cfg_json}"));
     // 原子写（tmp → 删旧 → rename），避免崩溃留半截 config
     let tmp_path = dir.join("config.json.tmp");
     std::fs::write(&tmp_path, &cfg_bytes).map_err(|e| format!("config 写入失败: {e}"))?;
@@ -398,7 +401,16 @@ fn core_state(app: AppHandle) -> Value {
 #[tauri::command]
 async fn core_delay(app: AppHandle, tag: String) -> Result<Option<u32>, String> {
     let api_port = load_settings().clash_api_port;
-    let d = clashapi::test_delay(&tag, api_port).await;
+    let d = match clashapi::test_delay(&tag, api_port).await {
+        Ok(delay) => delay,
+        Err(e) => {
+            log_line(&app, format!("延迟 {tag} 测试失败: {e}"));
+            if e.contains("404") {
+                return Err("节点列表已更新，请断开重连后生效".to_string());
+            }
+            return Ok(None);
+        }
+    };
     log_line(
         &app,
         format!("延迟 {tag}: {}", match d { None => "超时".to_string(), Some(v) => format!("{v}ms") }),
@@ -517,6 +529,30 @@ pub fn diag(msg: &str) {
     }
 }
 
+/// Pin WebView2 to the same local proxy as the sing-box mixed inbound.
+/// WebView2 creates its browser process before the user can enable the
+/// system proxy, so relying only on the Windows Internet Settings registry
+/// leaves the WebView on the proxy snapshot from application startup.
+fn configure_webview_proxy() {
+    let port = load_settings().mixed_port;
+    let args = format!(
+        "--proxy-server=http://127.0.0.1:{port} \
+         --proxy-bypass-list=ipc.localhost;localhost;127.0.0.1;[::1]"
+    );
+    let current = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+    if current.contains("--proxy-server=") {
+        diag("launch: keeping existing WEBVIEW2 proxy arguments");
+        return;
+    }
+    let combined = if current.trim().is_empty() {
+        args
+    } else {
+        format!("{current} {args}")
+    };
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &combined);
+    diag(&format!("launch: WebView2 proxy configured at 127.0.0.1:{port}"));
+}
+
 // ============================================================
 // 入口
 // ============================================================
@@ -535,7 +571,7 @@ pub fn run() {
     let (km, status) = kernel::KernelManager::new();
     let built = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // 单实例锁: 二开时聚焦已有窗口（替代旧版 requestSingleInstanceLock）
+        // 单实例锁: 二开时聚焦已有窗口
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
@@ -614,10 +650,8 @@ pub fn run() {
 }
 
 fn main() {
-    // WebView2 用户数据目录重定向到 exe 旁（ASCII 安全路径）
-    // —— 本机用户名非 ASCII（C:\Users\Killer丶二十\...），WebView2 loader 对该路径返回
-    //    os error 5（拒绝访问），与旧 Electron 工程的单实例锁 bug 同族。
-    //    固化到 exe 旁 data\webview\，便携版数据不落 C 盘、迁移不丢。
+    configure_webview_proxy();
+    // WebView2 用户数据目录重定向到 exe 旁，便携版数据不落系统盘。
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let wv = dir.join("data").join("webview");

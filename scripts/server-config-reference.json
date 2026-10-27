@@ -8,7 +8,7 @@
       "listen_port": 443,
       "users": [
         {
-          "uuid": "1a4284b5-9ea0-4f23-a4b6-5ee39025ad82",
+          "uuid": "00000000-0000-0000-0000-000000000000",
           "flow": "xtls-rprx-vision"
         }
       ],
@@ -21,8 +21,8 @@
             "server": "www.microsoft.com",
             "server_port": 443
           },
-          "private_key": "MPk0sF5ElFFVqdQUO_cgHPeUV-RU8eIl3oM_3rIk9UU",
-          "short_id": [ "a66be5dd872d463a" ]
+          "private_key": "REPLACE_WITH_SERVER_PRIVATE_KEY",
+          "short_id": [ "0123456789abcdef" ]
         }
       }
     }

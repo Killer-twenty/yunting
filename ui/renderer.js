@@ -1,4 +1,4 @@
-// 云亭渲染进程 —— 只经 window.yunting bridge 调用，无业务逻辑
+// yunting 渲染进程 —— 只经 window.yunting bridge 调用，无业务逻辑
 // Tauri 版 UI: 左侧导航 + VPN(默认)/订阅/日志/设置/游戏(占位)/联机(占位)
 const api = window.yunting
 
@@ -10,6 +10,7 @@ const state = {
   settings: {},
   core: null,
   proxy: null,
+  reloading: false,
 }
 
 // ---------- toast ----------
@@ -84,8 +85,15 @@ function renderNodes() {
     del.title = '删除'
     del.onclick = async (e) => {
       e.stopPropagation()
-      await api.removeNode(n.tag)
-      await refreshNodes()
+      try {
+        await api.removeNode(n.tag)
+        await refreshNodes()
+        await reloadCoreAfterNodeChange()
+      } catch (err) {
+        const m = errText(err)
+        toast(m, true)
+        log(`[gui] 删除节点失败: ${m}`)
+      }
     }
     row.append(type, tag, delay, del)
     row.onclick = () => {
@@ -151,7 +159,12 @@ function renderSubs(subs) {
     upd.textContent = '更新'
     upd.onclick = async () => {
       upd.disabled = true
-      try { await api.updateSub(s.id); await refreshNodes(); toast('订阅已更新') }
+      try {
+        await api.updateSub(s.id)
+        await refreshNodes()
+        await reloadCoreAfterNodeChange()
+        toast('订阅已更新')
+      }
       catch (e) {
         const m = errText(e)
         toast(m, true)
@@ -163,9 +176,16 @@ function renderSubs(subs) {
     del.textContent = '✕'
     del.title = '删除订阅'
     del.onclick = async () => {
-      await api.removeSub(s.id)
-      await Promise.all([refreshSubs(), refreshNodes()])
-      toast('订阅已删除')
+      try {
+        await api.removeSub(s.id)
+        await Promise.all([refreshSubs(), refreshNodes()])
+        await reloadCoreAfterNodeChange()
+        toast('订阅已删除')
+      } catch (e) {
+        const m = errText(e)
+        toast(m, true)
+        log(`[gui] 删除订阅失败: ${m}`)
+      }
     }
     row.append(name, meta, upd, del)
     box.appendChild(row)
@@ -185,12 +205,36 @@ function renderState(s) {
   // VPN 连接按钮
   $('btnConnect').style.display = running ? 'none' : ''
   $('btnDisconnect').style.display = running ? '' : 'none'
+  $('btnTestAll').disabled = !!state.reloading
+  $('btnTestAll').title = state.reloading ? '节点列表更新中，请稍候' : ''
   // 设置页系统代理状态
   if (state.proxy) {
     $('proxyStateText').textContent = state.proxy.enabled
       ? `已开启 → ${state.proxy.server}${state.proxy.ours ? '' : '（他程序设置）'}`
       : '已关闭'
     $('btnSysProxy').textContent = state.proxy.enabled ? '关系统代理' : '开系统代理'
+  }
+}
+
+async function reloadCoreAfterNodeChange() {
+  if (!(state.core && state.core.running)) return
+  state.reloading = true
+  renderState()
+  log('[gui] 节点列表已更新，正在重载内核…')
+  try {
+    await api.disconnect()
+    renderState(await api.getState())
+    await api.connect({ selectedTag: state.selectedTag })
+    renderState(await api.getState())
+    toast('节点已更新，内核重载完成')
+    log('[gui] 节点更新生效，内核重载完成')
+  } catch (e) {
+    const m = errText(e)
+    toast(`节点已更新，但内核重载失败：${m}`, true)
+    log(`[gui] 节点更新后内核重载失败: ${m}`)
+  } finally {
+    state.reloading = false
+    try { renderState(await api.getState()) } catch (e) { log(`[gui] 状态刷新失败: ${errText(e)}`) }
   }
 }
 
@@ -218,12 +262,25 @@ async function connect() {
 
 // ---------- 延迟 ----------
 async function testDelay(tag) {
-  const d = await api.testDelay(tag)
-  state.delays[tag] = d === null ? 'fail' : d
-  renderNodes()
+  if (state.reloading) return
+  try {
+    const d = await api.testDelay(tag)
+    state.delays[tag] = d === null ? 'fail' : d
+    renderNodes()
+  } catch (e) {
+    const m = errText(e)
+    if (m.includes('404')) {
+      toast('节点列表已更新，请断开重连后生效', true)
+      log(`[gui] 延迟测试失败：节点列表已更新，请断开重连后生效（${tag}）`)
+    } else {
+      toast(m, true)
+      log(`[gui] 延迟 ${tag} 测试失败: ${m}`)
+    }
+  }
 }
 
 async function testAll() {
+  if (state.reloading) return toast('节点列表更新中，请稍候', true)
   const tags = state.nodes.map((n) => n.tag)
   if (tags.length === 0) return toast('没有节点', true)
   if (!(state.core && state.core.running)) return toast('请先连接内核（延迟测试走 clash api）', true)
@@ -351,6 +408,7 @@ $('btnImportOk').onclick = async () => {
     const r = await api.addShareLinks(text)
     $('dlgImport').close()
     await refreshNodes()
+    await reloadCoreAfterNodeChange()
     toast(`导入成功：新增 ${r.added}，共 ${r.total}`)
   } catch (e) {
     const m = errText(e)
@@ -370,6 +428,7 @@ $('btnSubAdd').onclick = async () => {
     $('subUrl').value = ''
     $('subName').value = ''
     await Promise.all([refreshSubs(), refreshNodes()])
+    await reloadCoreAfterNodeChange()
     toast('订阅添加成功')
   } catch (e) {
     const m = errText(e)
@@ -401,7 +460,7 @@ api.onState(renderState)
 
 // ---------- 初始化 ----------
 ;(async function init() {
-  log('[gui] 云亭启动')
+  log('[gui] yunting 启动')
   if (!api) {
     log('[gui] ⚠️ bridge 未就绪（window.yunting 缺失）—— 检查 tauri withGlobalTauri')
     return

@@ -1,4 +1,4 @@
-// 云亭 Tauri 版 bridge —— 暴露与旧版 preload.js 完全一致的 window.yunting 接口
+// yunting Tauri 版 bridge —— 暴露与旧版 preload.js 完全一致的 window.yunting 接口
 // renderer.js 零改动复用；所有调用转发到 Tauri invoke / event。
 // 纯函数（解析/config生成）在本文件内本地执行（parsers.js/configBuilder.js 原样加载），
 // 拉订阅由 Rust 侧 fetch_text 完成后再回前端解析（订阅文本 → parse → 传节点给 Rust）。
@@ -6,7 +6,7 @@
   // Tauri 2 需开启 withGlobalTauri 才有 window.__TAURI__（tauri.conf.json app.withGlobalTauri: true）
   if (!window.__TAURI__) {
     console.error('[bridge] window.__TAURI__ 缺失 —— tauri.conf.json 未开 withGlobalTauri')
-    document.addEventListener('DOMContentLoaded', () => { document.title = '云亭 (bridge 失败: __TAURI__ 缺失)' })
+    document.addEventListener('DOMContentLoaded', () => { document.title = 'yunting (bridge 失败: __TAURI__ 缺失)' })
     return
   }
   const { invoke } = window.__TAURI__.core
@@ -18,11 +18,11 @@
     parsers = __loadModule('lib/parsers.js')
   } catch (e) {
     console.error('[bridge] parsers.js 加载失败:', e)
-    document.title = '云亭 (parsers 加载失败)'
+    document.title = 'yunting (parsers 加载失败)'
     throw e
   }
   if (!parsers || typeof parsers.parseShareLink !== 'function') {
-    document.title = '云亭 (parsers 接口异常)'
+    document.title = 'yunting (parsers 接口异常)'
     throw new Error('parsers 接口异常')
   }
   // configBuilder 仅在需要时由 Rust 侧生成 config；前端不需要加载它

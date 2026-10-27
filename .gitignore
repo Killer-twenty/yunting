@@ -9,6 +9,9 @@ src-tauri/target/
 *.exe
 kernel/*.zip
 kernel/*.md
+!kernel/README.md
+kernel/*.exe
+kernel/*.srs
 .verify-*/
 data/electron/
 data/config.json

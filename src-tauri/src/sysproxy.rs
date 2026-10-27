@@ -1,9 +1,15 @@
 // Windows 系统代理 —— 注册表 + WM_SETTINGCHANGE 广播（Rust 重写，windows crate 原生 API）
 // HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 // 写入策略: windows-rs 直写 → 失败时 UAC 提权兜底（对齐旧版三层策略的语义）
+//
+// 所有权设计（防误伤他程序）:
+//   只有本程序真正改过系统代理时才允许改回去。用 data/sysproxy-marker.json 记录
+//   「我们设置的值 + 设置前的原值」；没有 marker 就不碰注册表。
+//   否则会出现: 用户 Clash 开着 7890 系统代理，yunting 断开时把 Clash 的代理关掉。
+use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, NO_ERROR};
 use windows::Win32::System::Registry::{
@@ -24,14 +30,41 @@ pub struct ProxyStatus {
     pub ours: bool,
 }
 
-// 记住开代理前的原值，退出恢复用；None = 原本没开
-static SAVED: Mutex<Option<SavedProxy>> = Mutex::new(None);
-
-#[derive(Clone)]
-struct SavedProxy {
-    enabled: bool,
+/// 所有权标记: 我们设置的系统代理值 + 设置前的原值
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Marker {
+    /// 我们写进去的 ProxyServer
     server: String,
+    /// 设置前 ProxyEnable
+    prev_enabled: bool,
+    /// 设置前 ProxyServer
+    prev_server: String,
 }
+
+fn marker_path() -> PathBuf {
+    crate::paths::data_dir().join("sysproxy-marker.json")
+}
+
+fn read_marker() -> Option<Marker> {
+    let p = marker_path();
+    let text = std::fs::read_to_string(&p).ok()?;
+    serde_json::from_str::<Marker>(&text).ok()
+}
+
+fn write_marker(m: &Marker) {
+    if let Ok(bytes) = serde_json::to_vec_pretty(m) {
+        let _ = std::fs::create_dir_all(crate::paths::data_dir());
+        let _ = std::fs::write(marker_path(), bytes);
+    }
+}
+
+fn clear_marker() {
+    let _ = std::fs::remove_file(marker_path());
+}
+
+// 进程内镜像（同一进程内 enable → disable 不必反复读盘；跨重启由 marker 文件保证）
+static SAVED: Mutex<Option<Marker>> = Mutex::new(None);
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -155,20 +188,39 @@ pub struct EnableResult {
     pub via: String,
 }
 
-/// 开系统代理（127.0.0.1:port）。记录原值用于恢复（仅在首次 enable 时记录，
-/// 重复 enable 不清掉最早的原始值，保证退出恢复链不丢）。
+/// 开系统代理（127.0.0.1:port）。记录原值用于恢复。
+/// 只有在没有 marker 时才记录（重复 enable 不覆盖最初的原始值，恢复链不丢）。
 pub fn enable(port: u16) -> Result<EnableResult, String> {
-    let was_enabled = read_proxy_enable();
-    let prev_server = read_proxy_server();
-    let first_record = {
-        let mut s = SAVED.lock().unwrap();
-        let first = s.is_none();
-        if first {
-            *s = Some(SavedProxy { enabled: was_enabled, server: prev_server });
-        }
-        first
-    };
     let server = format!("127.0.0.1:{port}");
+    let first_record = {
+        let mut s = SAVED.lock().unwrap_or_else(|e| e.into_inner());
+        if s.is_none() {
+            // 进程内没有 → 看磁盘上是否已有（上轮 enable 留下的、或异常退出残留）
+            *s = read_marker();
+        }
+        if s.is_none() {
+            let prev_enabled = read_proxy_enable();
+            let prev_server = read_proxy_server();
+            *s = Some(Marker {
+                server: server.clone(),
+                prev_enabled,
+                prev_server,
+            });
+            true
+        } else {
+            // 已有记录: 只更新"我们当前写入的值"，保留最初的 prev_*
+            if let Some(m) = s.as_mut() {
+                m.server = server.clone();
+            }
+            false
+        }
+    };
+    // 落盘 marker（首次记录时）
+    if first_record {
+        if let Some(m) = SAVED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            write_marker(m);
+        }
+    }
     // 层1: windows-rs 直写（HKCU 本应无需提权）
     let write = (|| -> Result<(), String> {
         reg_set_sz("ProxyServer", &server)?;
@@ -184,7 +236,8 @@ pub fn enable(port: u16) -> Result<EnableResult, String> {
                 Ok(()) => "elevate".to_string(),
                 Err(e2) => {
                     if first_record {
-                        *SAVED.lock().unwrap() = None;
+                        *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                        clear_marker();
                     }
                     return Err(format!("系统代理写入失败(已试 winreg/管理员两种方式): {e} / {e2}"));
                 }
@@ -238,45 +291,94 @@ fn base64_encode(data: &[u8]) -> String {
     out
 }
 
-/// 关系统代理。restore=true 且之前记过原值 → 恢复原值而非简单关闭。
-/// 恢复失败不再静默吞掉 —— 返回值让调用方打日志提示。
+/// 关系统代理并恢复原值。
+/// 安全性: 没有我们的 marker、且当前注册表值不是我们写的 → 说明系统代理是别的程序设的，
+///         此时绝不改动注册表（否则会关掉 Clash 等其他代理软件）。
 pub fn disable_restore() -> Result<(), String> {
-    let saved = SAVED.lock().unwrap().clone();
-    let r = match saved {
-        Some(s) if s.enabled && !s.server.is_empty() => {
-            reg_set_sz("ProxyServer", &s.server)?;
-            reg_set_dword("ProxyEnable", 1)
+    let saved = {
+        let mut s = SAVED.lock().unwrap_or_else(|e| e.into_inner());
+        if s.is_none() {
+            *s = read_marker();
         }
-        _ => reg_set_dword("ProxyEnable", 0),
+        s.clone()
     };
-    *SAVED.lock().unwrap() = None;
+    let cur_enabled = read_proxy_enable();
+    let cur_server = read_proxy_server();
+
+    let Some(m) = saved else {
+        // 从未由本程序设置过 → 不碰注册表
+        return Ok(());
+    };
+
+    // 当前值已不是我们写的（用户/他程序改过）→ 不覆盖，只清标记
+    let still_ours = cur_enabled && cur_server == m.server;
+    if !still_ours {
+        *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        clear_marker();
+        return Ok(());
+    }
+
+    let r = if m.prev_enabled && !m.prev_server.is_empty() {
+        // 恢复用户原本的代理
+        reg_set_sz("ProxyServer", &m.prev_server)?;
+        reg_set_dword("ProxyEnable", 1)
+    } else {
+        reg_set_dword("ProxyEnable", 0)
+    };
+    *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    clear_marker();
     broadcast_setting_change();
     r
 }
 
-/// 强制关闭（不恢复原值）
+/// 强制关闭（不恢复原值）—— 仅用于启动残留清理，且只在确认是我们写的时才调用
 pub fn disable_force() {
     let _ = reg_set_dword("ProxyEnable", 0);
-    *SAVED.lock().unwrap() = None;
+    *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    clear_marker();
     broadcast_setting_change();
 }
 
 pub fn status() -> ProxyStatus {
     let enabled = read_proxy_enable();
     let server = read_proxy_server();
-    let ours = enabled && server.starts_with("127.0.0.1:");
+    // ours 的判定: 有 marker 且当前 server 与 marker 记录一致才算我们的
+    let ours = match read_marker() {
+        Some(m) => enabled && server == m.server,
+        None => false,
+    };
     ProxyStatus { enabled, server, ours }
 }
 
-/// 启动残留检测: 系统代理指向 port → 自动清掉（启动时内核必未运行）。返回是否执行了清理。
+/// 启动残留检测: 上次是我们写的代理且内核已不在 → 清掉。返回是否执行了清理。
+/// 必须同时满足: 有 marker + 当前值等于 marker 记录 + 内核端口匹配，
+/// 避免误伤用户其他代理软件（如 Clash 也监听 127.0.0.1）。
 pub fn cleanup_stale(port: u16) -> bool {
-    let s = status();
-    if !s.enabled {
+    let Some(m) = read_marker() else { return false };
+    let cur_enabled = read_proxy_enable();
+    let cur_server = read_proxy_server();
+    if !cur_enabled {
+        clear_marker();
         return false;
     }
-    if s.server == format!("127.0.0.1:{port}") {
-        disable_force();
+    let expected = format!("127.0.0.1:{port}");
+    // marker 里记的是我们的值，且当前注册表仍是那个值
+    if m.server == expected && cur_server == m.server {
+        disable_restore_force_marker(&m);
         return true;
     }
     false
+}
+
+/// cleanup_stale 专用: 按 marker 恢复原值（不看"当前是否 ours"，因为已校验过）
+fn disable_restore_force_marker(m: &Marker) {
+    if m.prev_enabled && !m.prev_server.is_empty() {
+        let _ = reg_set_sz("ProxyServer", &m.prev_server);
+        let _ = reg_set_dword("ProxyEnable", 1);
+    } else {
+        let _ = reg_set_dword("ProxyEnable", 0);
+    }
+    *SAVED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    clear_marker();
+    broadcast_setting_change();
 }

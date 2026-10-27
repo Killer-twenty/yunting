@@ -63,7 +63,7 @@ function buildConfig(profile) {
 
   const config = {
     log: { level: 'info', timestamp: true },
-    dns: buildDns(proxyTags, mode),
+    dns: buildDns(mode),
     inbounds: buildInbounds(profile, mixedPort),
     outbounds,
     route: buildRoute(mode, profile.directList || []),
@@ -105,7 +105,7 @@ function buildInbounds(profile, mixedPort) {
 }
 
 // ---------- dns：按 mode 分流解析 ----------
-function buildDns(proxyTags, mode = 'rule') {
+function buildDns(mode = 'rule') {
   if (mode === 'global') {
     // 全局：所有解析走代理 DNS，防止国内 DNS 污染国外域名
     return {
@@ -189,7 +189,8 @@ const TYPE_MAP = { ss: 'shadowsocks', vless: 'vless', vmess: 'vmess', trojan: 't
 
 // ---------- 节点 → sing-box outbound ----------
 function nodeToOutbound(node) {
-  if (!node || !node.server || !node.server_port || !node.type) return null
+  if (!node || !node.server || !Number.isSafeInteger(node.server_port) ||
+      node.server_port < 1 || node.server_port > 65535 || !node.type) return null
   const outboundType = TYPE_MAP[node.type]
   if (!outboundType) return null
   const base = {

@@ -17,8 +17,19 @@ function safeDecodeURIComponent(s) {
   try { return decodeURIComponent(s) } catch { return s }
 }
 
-function tryJsonParse(s) {
-  try { return JSON.parse(s) } catch { return null }
+// Reality sid/pbk are opaque protocol values. parseUri has already performed
+// the single URL-decoding step; do not parse, normalize, or reinterpret them.
+function opaqueParam(params, name) {
+  return Object.prototype.hasOwnProperty.call(params, name)
+    ? params[name]
+    : ''
+}
+
+function parsePort(value) {
+  const text = String(value ?? '').trim()
+  if (!/^\d+$/.test(text)) return 0
+  const port = Number(text)
+  return Number.isSafeInteger(port) && port > 0 && port <= 65535 ? port : 0
 }
 
 // ---------- URL 解析基座：把 uri 解析成 { host, port, userinfo, params, name } ----------
@@ -57,15 +68,14 @@ function parseUri(uri) {
   let host = ''
   let port = 0
   const v6 = rest.match(/^\[(.+)\]:(\d+)$/)
-  if (v6) { host = v6[1]; port = parseInt(v6[2], 10) }
+  if (v6) { host = v6[1]; port = parsePort(v6[2]) }
   else {
     const cIdx = rest.lastIndexOf(':')
     if (cIdx < 0) return null
     host = rest.slice(0, cIdx)
-    port = parseInt(rest.slice(cIdx + 1), 10)
+    port = parsePort(rest.slice(cIdx + 1))
   }
   if (!host || !port) return null
-  if (!(port > 0 && port <= 65535)) return null // 超出 uint16 范围 sing-box 直接拒收
   return { scheme, userinfo, host, port, params, name }
 }
 
@@ -79,8 +89,8 @@ function tlsFields(params, defaults = {}) {
       out.tls.utls = { enabled: true, fingerprint: params.fp || 'chrome' }
       out.tls.reality = {
         enabled: true,
-        public_key: params.pbk || '',
-        short_id: params.sid || '',
+        public_key: opaqueParam(params, 'pbk'),
+        short_id: opaqueParam(params, 'sid'),
       }
     } else {
       if (params.fp) out.tls.utls = { enabled: true, fingerprint: params.fp }
@@ -138,9 +148,8 @@ function parseVmess(uri) {
   let json
   try { json = JSON.parse(Buffer.from(raw, 'base64').toString('utf-8')) } catch { return null }
   if (!json || !json.add || !json.id) return null
-  const port = parseInt(json.port, 10)
+  const port = parsePort(json.port)
   if (!port) return null
-  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const node = {
     tag: (json.ps && String(json.ps)) || `${json.add}:${port}`,
     type: 'vmess',
@@ -149,7 +158,11 @@ function parseVmess(uri) {
     uuid: String(json.id),
     security: json.scy || 'auto',
   }
-  if (String(json.aid ?? '0') !== '0') node.alter_id = parseInt(json.aid, 10)
+  if (String(json.aid ?? '0') !== '0') {
+    const alterId = Number(json.aid)
+    if (!Number.isSafeInteger(alterId) || alterId < 0) return null
+    node.alter_id = alterId
+  }
   const params = {
     type: json.net || 'tcp',
     security: json.tls === 'tls' ? 'tls' : '',
@@ -208,7 +221,7 @@ function parseSS(uri) {
     const cIdx = hostport.lastIndexOf(':')
     if (cIdx < 0) return null
     host = hostport.slice(0, cIdx)
-    port = parseInt(hostport.slice(cIdx + 1), 10)
+    port = parsePort(hostport.slice(cIdx + 1))
     let decoded = userinfo
     if (!userinfo.includes(':')) {
       try {
@@ -229,10 +242,9 @@ function parseSS(uri) {
     try { decoded = Buffer.from(b, 'base64').toString('utf-8') } catch { return null }
     const m = decoded.match(/^(.+?):(.*)@(.+?):(\d+)$/s)
     if (!m) return null
-    method = m[1]; password = m[2]; host = m[3]; port = parseInt(m[4], 10)
+    method = m[1]; password = m[2]; host = m[3]; port = parsePort(m[4])
   }
   if (!host || !port || !method) return null
-  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const node = {
     tag: name || `${host}:${port}`,
     type: 'ss',
@@ -346,9 +358,8 @@ function parseClashSubscription(yamlText) {
 }
 
 function clashProxyToNode(p) {
-  const port = parseInt(p.port, 10)
+  const port = parsePort(p.port)
   if (!port) return null
-  if (!(port > 0 && port <= 65535)) return null // 超 uint16 范围 sing-box 拒收
   const tag = p.name || `${p.server}:${port}`
   const base = { tag, server: String(p.server), server_port: port }
 

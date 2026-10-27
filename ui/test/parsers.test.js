@@ -26,6 +26,18 @@ test('vless reality 分享链接', () => {
   assert.strictEqual(n.tls.utls.fingerprint, 'chrome')
 })
 
+test('vless reality 保留大小写 sid 和 URL-safe pbk', () => {
+  const uri = 'vless://u@1.2.3.4:443?security=reality&sni=www.cloudflare.com&pbk=DJk-alzV7TbEcm_txr3TytBs5Tz2m6LID8dHAyTk81c&sid=fac31c1c&type=tcp#mixed'
+  const n = parseShareLink(uri)
+  assert.ok(n)
+  assert.strictEqual(n.tls.reality.short_id, 'fac31c1c')
+  assert.strictEqual(n.tls.reality.public_key, 'DJk-alzV7TbEcm_txr3TytBs5Tz2m6LID8dHAyTk81c')
+
+  const encoded = parseShareLink('vless://u@1.2.3.4:443?security=reality&pbk=DJk%2BalzV7TbEcm_txr3TytBs5Tz2m6LID8dHAyTk81c&sid=FaC31C1c')
+  assert.strictEqual(encoded.tls.reality.short_id, 'FaC31C1c')
+  assert.strictEqual(encoded.tls.reality.public_key, 'DJk+alzV7TbEcm_txr3TytBs5Tz2m6LID8dHAyTk81c')
+})
+
 test('vless ws 链接', () => {
   const uri = 'vless://u1@example.com:8443?type=ws&security=tls&path=%2Fws&host=cdn.example.com#ws节点'
   const n = parseShareLink(uri)
@@ -131,6 +143,13 @@ test('超范围端口被拒（>65535）', () => {
   assert.strictEqual(parseShareLink('vless://u@1.1.1.1:70000?security=tls#x'), null)
   assert.strictEqual(parseShareLink('trojan://p@2.2.2.2:99999#x'), null)
   const json = { v: '2', ps: 'A', add: '1.1.1.1', port: '65536', id: 'x' }
+  assert.strictEqual(parseShareLink('vmess://' + Buffer.from(JSON.stringify(json)).toString('base64')), null)
+})
+
+test('非数字端口被拒', () => {
+  assert.strictEqual(parseShareLink('vless://u@1.1.1.1:443abc#x'), null)
+  assert.strictEqual(parseShareLink('trojan://p@2.2.2.2:80.5#x'), null)
+  const json = { v: '2', ps: 'A', add: '1.1.1.1', port: '443abc', id: 'x' }
   assert.strictEqual(parseShareLink('vmess://' + Buffer.from(JSON.stringify(json)).toString('base64')), null)
 })
 

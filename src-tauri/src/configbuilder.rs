@@ -1,6 +1,7 @@
 // sing-box config 生成 —— Rust 实现（对齐旧版 configBuilder.js 产物结构）
 // 输入: 节点列表(与旧版节点对象一致) / 选中 tag / 端口 / 模式
 // 输出: 完整 sing-box 1.11 格式 config（与 data/smoke-config.json 同构）
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::paths::kernel_dir;
@@ -162,6 +163,21 @@ fn outbound_type(t: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct RealityParams {
+    enabled: bool,
+    public_key: String,
+    short_id: String,
+}
+
+fn strict_reality_tls(tls: &Value) -> Option<Value> {
+    let reality = tls.get("reality")?;
+    let params: RealityParams = serde_json::from_value(reality.clone()).ok()?;
+    let mut tls = tls.clone();
+    tls["reality"] = serde_json::to_value(params).ok()?;
+    Some(tls)
+}
+
 /// 节点 → sing-box outbound（对齐旧版 nodeToOutbound）
 pub fn node_to_outbound(node: &Value) -> Option<Value> {
     let server = node.get("server")?.as_str()?;
@@ -186,7 +202,13 @@ pub fn node_to_outbound(node: &Value) -> Option<Value> {
         "vless" => {
             ob["uuid"] = node.get("uuid").cloned().unwrap_or(Value::Null);
             ob["flow"] = json!(node.get("flow").and_then(|v| v.as_str()).unwrap_or(""));
-            if let Some(v) = node.get("tls") { ob["tls"] = v.clone(); }
+            if let Some(v) = node.get("tls") {
+                ob["tls"] = if v.get("reality").is_some() {
+                    strict_reality_tls(v)?
+                } else {
+                    v.clone()
+                };
+            }
             if let Some(v) = node.get("transport") { ob["transport"] = v.clone(); }
         }
         "vmess" => {
