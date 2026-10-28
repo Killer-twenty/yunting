@@ -3,7 +3,7 @@
 //! yunting Tauri 版主入口
 //! 架构:
 //!   ui/                —— 复用旧版原生 JS 前端 + 纯函数模块(parsers/configBuilder)
-//!   src-tauri/src/     —— Rust: paths/store/kernel/sysproxy/clashapi/configbuilder
+//!   src-tauri/src/     —— Rust: paths/store/kernel/proxy/clashapi/configbuilder
 //! 数据: %APPDATA%\yunting（与 Electron 版数据隔离）；不可写时兜底 exe 旁 data/
 //! 内核: 打包态 exe 旁 kernel/；开发态项目 kernel/
 
@@ -11,15 +11,15 @@ mod clashapi;
 mod configbuilder;
 mod kernel;
 mod paths;
+mod proxy_util;
 mod store;
-mod sysproxy;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
-use std::sync::Arc;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::Mutex;
 
 use paths::{data_dir, kernel_exe};
 use store::{load_nodes, load_settings, load_subs, save_nodes, save_subs, Settings};
@@ -37,9 +37,18 @@ fn now_hms() -> String {
     #[repr(C)]
     #[derive(Default)]
     struct ST {
-        _y: u16, _mo: u16, _dow: u16, _d: u16, h: u16, m: u16, s: u16, _ms: u16,
+        _y: u16,
+        _mo: u16,
+        _dow: u16,
+        _d: u16,
+        h: u16,
+        m: u16,
+        s: u16,
+        _ms: u16,
     }
-    extern "system" { fn GetLocalTime(p: *mut ST); }
+    extern "system" {
+        fn GetLocalTime(p: *mut ST);
+    }
     unsafe {
         let mut st = ST::default();
         GetLocalTime(&mut st);
@@ -64,7 +73,7 @@ fn core_snapshot(app: &AppHandle) -> kernel::KernelSnapshot {
 fn broadcast_state(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let core = core_snapshot(app);
-        let proxy = sysproxy::status();
+        let proxy = proxy_util::status_json();
         let _ = win.emit("state", json!({ "core": core, "proxy": proxy }));
     }
 }
@@ -106,7 +115,10 @@ fn nodes_add(app: AppHandle, nodes: Vec<Value>) -> Result<Value, String> {
     let merged = dedupe(merged);
     let added = merged.len() - existing.len();
     save_nodes(merged.clone())?;
-    log_line(&app, format!("导入 {added} 个节点（识别 {parsed_count}，去重后新增 {added}）"));
+    log_line(
+        &app,
+        format!("导入 {added} 个节点（识别 {parsed_count}，去重后新增 {added}）"),
+    );
     Ok(json!({ "added": added, "total": merged.len() }))
 }
 
@@ -162,7 +174,12 @@ fn subs_get() -> Vec<Value> {
 
 /// 前端解析订阅文本后传节点过来；url 由前端传入。一次往返完成订阅添加。
 #[tauri::command]
-async fn subs_add(app: AppHandle, url: String, name: Option<String>, nodes: Vec<Value>) -> Result<Value, String> {
+async fn subs_add(
+    app: AppHandle,
+    url: String,
+    name: Option<String>,
+    nodes: Vec<Value>,
+) -> Result<Value, String> {
     let node_count = nodes.len();
     if nodes.is_empty() {
         return Err("订阅内容解析不出节点".into());
@@ -212,7 +229,13 @@ async fn subs_update(app: AppHandle, id: String, nodes: Vec<Value>) -> Result<Va
         .iter_mut()
         .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(id.as_str()))
         .ok_or("订阅不存在")?;
-    log_line(&app, format!("更新订阅 {} ...", sub.get("name").and_then(|v| v.as_str()).unwrap_or("")));
+    log_line(
+        &app,
+        format!(
+            "更新订阅 {} ...",
+            sub.get("name").and_then(|v| v.as_str()).unwrap_or("")
+        ),
+    );
     sub["updatedAt"] = json!(now_millis());
     sub["nodeCount"] = json!(node_count);
     save_subs(subs)?;
@@ -255,7 +278,11 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
         return Err("没有可用节点，请先导入".into());
     }
     let settings = load_settings();
-    let mode = if settings.route_mode == "global" { "global" } else { "rule" };
+    let mode = if settings.route_mode == "global" {
+        "global"
+    } else {
+        "rule"
+    };
     let mixed_port = settings.mixed_port;
     let api_port = settings.clash_api_port;
 
@@ -284,7 +311,14 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     }
 
     // Rust 侧生成 config（configbuilder.rs 纯函数）
-    let cfg = configbuilder::build_config(&nodes, &selected_tag, mixed_port, api_port, mode, &settings.direct_list)?;
+    let cfg = configbuilder::build_config(
+        &nodes,
+        &selected_tag,
+        mixed_port,
+        api_port,
+        mode,
+        &settings.direct_list,
+    )?;
     let exe = kernel_exe();
     if !exe.exists() {
         return Err(format!("内核不存在: {}", exe.display()));
@@ -292,8 +326,10 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     let dir = data_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let cfg_path = dir.join("config.json");
-    let cfg_bytes = serde_json::to_vec_pretty(&cfg).map_err(|e| format!("config 序列化失败: {e}"))?;
-    let cfg_json = serde_json::to_string(&cfg).map_err(|e| format!("最终 config 序列化失败: {e}"))?;
+    let cfg_bytes =
+        serde_json::to_vec_pretty(&cfg).map_err(|e| format!("config 序列化失败: {e}"))?;
+    let cfg_json =
+        serde_json::to_string(&cfg).map_err(|e| format!("最终 config 序列化失败: {e}"))?;
     diag(&format!("Final Config: {cfg_json}"));
     log_line(&app, format!("[core] Final Config: {cfg_json}"));
     // 原子写（tmp → 删旧 → rename），避免崩溃留半截 config
@@ -328,8 +364,17 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
         broadcast_state(&app);
         return Err(e);
     }
-    log_line(&app, format!("[core] 内核已启动（mixed :{mixed_port} / clash api :{api_port} / 模式 {}）",
-        if mode == "global" { "全局代理" } else { "规则分流" }));
+    log_line(
+        &app,
+        format!(
+            "[core] 内核已启动（mixed :{mixed_port} / clash api :{api_port} / 模式 {}）",
+            if mode == "global" {
+                "全局代理"
+            } else {
+                "规则分流"
+            }
+        ),
+    );
 
     // clash api 就绪等待（spawn_blocking，不阻塞 async runtime）
     let ready = match tokio::task::spawn_blocking(move || {
@@ -344,15 +389,19 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     match ready {
         Ok(()) => {
             log_line(&app, "[core] clash api 就绪");
+            let mixed_ready = tokio::task::spawn_blocking(move || {
+                kernel::wait_port_ready(mixed_port, std::time::Duration::from_secs(5))
+            })
+            .await
+            .map_err(|e| format!("mixed 端口探测线程失败: {e}"))?;
+            mixed_ready?;
+            log_line(&app, format!("[core] mixed 代理端口 {mixed_port} 就绪"));
             // 自动系统代理 —— 失败不阻塞连接
             let auto = load_settings().auto_system_proxy;
             if auto {
-                match sysproxy::enable(mixed_port) {
-                    Ok(r) => log_line(&app, format!("系统代理已开启 → {}（via {}）", r.server, r.via)),
-                    Err(e) => {
-                        log_line(&app, format!("[系统代理] 自动开启失败: {e}"));
-                        log_line(&app, format!("[系统代理] 请手动设置：Windows 设置 → 网络和 Internet → 代理 → 手动设置代理 → 127.0.0.1:{mixed_port}"));
-                    }
+                match proxy_util::enable(&format!("127.0.0.1:{mixed_port}")) {
+                    Ok(()) => log_line(&app, format!("系统代理已开启 → 127.0.0.1:{mixed_port}")),
+                    Err(e) => log_line(&app, format!("[系统代理] 自动开启失败: {e}")),
                 }
             }
             broadcast_state(&app);
@@ -367,7 +416,7 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
                 // 停止内核（内核都没起来时 stop 内部直接置位返回）
                 let _ = km.stop().await;
             }
-            let _ = sysproxy::disable_restore();
+            let _ = proxy_util::disable();
             broadcast_state(&app);
             Err(format!("内核启动失败: {e}"))
         }
@@ -382,19 +431,26 @@ async fn core_disconnect(app: AppHandle) -> Result<Value, String> {
         let km = state.0.lock().await;
         km.stop().await.map_err(|e| e.to_string())?;
     }
-    if let Err(e) = sysproxy::disable_restore() {
+
+    // 恢复系统代理
+    if let Err(e) = proxy_util::disable() {
         log_line(&app, format!("系统代理恢复失败: {e}"));
     }
+
     log_line(&app, "已断开，系统代理已恢复");
     broadcast_state(&app);
     Ok(json!(core_snapshot(&app)))
+}
+
+fn get_proxy_status() -> serde_json::Value {
+    proxy_util::status_json()
 }
 
 #[tauri::command]
 fn core_state(app: AppHandle) -> Value {
     json!({
         "core": core_snapshot(&app),
-        "proxy": sysproxy::status(),
+        "proxy": get_proxy_status(),
     })
 }
 
@@ -413,7 +469,13 @@ async fn core_delay(app: AppHandle, tag: String) -> Result<Option<u32>, String> 
     };
     log_line(
         &app,
-        format!("延迟 {tag}: {}", match d { None => "超时".to_string(), Some(v) => format!("{v}ms") }),
+        format!(
+            "延迟 {tag}: {}",
+            match d {
+                None => "超时".to_string(),
+                Some(v) => format!("{v}ms"),
+            }
+        ),
     );
     Ok(d)
 }
@@ -424,20 +486,22 @@ async fn core_delay(app: AppHandle, tag: String) -> Result<Option<u32>, String> 
 #[tauri::command]
 fn sysproxy_set(app: AppHandle, on: bool) -> Result<Value, String> {
     let port = load_settings().mixed_port;
+
     if on {
-        let r = sysproxy::enable(port)?;
-        log_line(&app, format!("系统代理已开启 → {}（via {}）", r.server, r.via));
+        proxy_util::enable(&format!("127.0.0.1:{port}"))?;
+        log_line(&app, format!("系统代理已开启 → 127.0.0.1:{port}"));
     } else {
-        sysproxy::disable_restore().map_err(|e| e.to_string())?;
+        proxy_util::disable()?;
         log_line(&app, "系统代理已关闭");
     }
+
     broadcast_state(&app);
-    Ok(json!(sysproxy::status()))
+    Ok(proxy_util::status_json())
 }
 
 #[tauri::command]
 fn sysproxy_get() -> Value {
-    json!(sysproxy::status())
+    proxy_util::status_json()
 }
 
 // ============================================================
@@ -513,7 +577,11 @@ pub fn diag(msg: &str) {
         .unwrap_or_default();
     let _ = std::fs::create_dir_all(exe_dir.join("data"));
     let log = exe_dir.join("data").join("main-diag.log");
-    if log.metadata().map(|m| m.len() > 256 * 1024).unwrap_or(false) {
+    if log
+        .metadata()
+        .map(|m| m.len() > 256 * 1024)
+        .unwrap_or(false)
+    {
         let _ = std::fs::rename(&log, exe_dir.join("data").join("main-diag.log.old"));
     }
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -533,6 +601,11 @@ pub fn diag(msg: &str) {
 /// WebView2 creates its browser process before the user can enable the
 /// system proxy, so relying only on the Windows Internet Settings registry
 /// leaves the WebView on the proxy snapshot from application startup.
+///
+/// 当前停用：Windows 侧 WebView2 默认跟随用户级 Internet Settings，
+/// 启动时强制 pin 代理会在内核未运行时把 WebView 流量指向死端口。
+/// 保留实现备查，需要时在 main() 里取消注释调用。
+#[allow(dead_code)]
 fn configure_webview_proxy() {
     let port = load_settings().mixed_port;
     let args = format!(
@@ -550,7 +623,9 @@ fn configure_webview_proxy() {
         format!("{current} {args}")
     };
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &combined);
-    diag(&format!("launch: WebView2 proxy configured at 127.0.0.1:{port}"));
+    diag(&format!(
+        "launch: WebView2 proxy configured at 127.0.0.1:{port}"
+    ));
 }
 
 // ============================================================
@@ -562,16 +637,13 @@ pub fn run() {
     // 启动残留清理（孤儿 sing-box + 系统代理残留）
     let orphan = kernel::cleanup_orphans();
     diag(&format!("run: orphan cleanup done ({orphan})"));
-    let settings = load_settings();
-    let cleaned_stale = sysproxy::cleanup_stale(settings.mixed_port);
+    let cleaned_stale = proxy_util::cleanup_stale(load_settings().mixed_port);
     diag(&format!("run: stale proxy cleanup done ({cleaned_stale})"));
     let boot_note = (orphan, cleaned_stale);
 
     // 内核 manager 与状态句柄分离: manager 需 async 锁，状态可无锁同步读
     let (km, status) = kernel::KernelManager::new();
     let built = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        // 单实例锁: 二开时聚焦已有窗口
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
@@ -581,12 +653,23 @@ pub fn run() {
         .manage(KernelState(Mutex::new(km)))
         .manage(KernelStatusHandle(status))
         .invoke_handler(tauri::generate_handler![
-            nodes_get, nodes_add, nodes_remove,
-            subs_get, subs_add, subs_update, subs_remove,
-            core_connect, core_disconnect, core_state, core_delay,
-            sysproxy_set, sysproxy_get,
-            settings_get, settings_save,
-            diag_paths, fetch_text,
+            nodes_get,
+            nodes_add,
+            nodes_remove,
+            subs_get,
+            subs_add,
+            subs_update,
+            subs_remove,
+            core_connect,
+            core_disconnect,
+            core_state,
+            core_delay,
+            sysproxy_set,
+            sysproxy_get,
+            settings_get,
+            settings_save,
+            diag_paths,
+            fetch_text,
         ])
         .on_window_event(|window, event| {
             // 窗口销毁时同步清理底层资源（注册表恢复 + 停内核）
@@ -594,7 +677,7 @@ pub fn run() {
             //      且若恰好处于 runtime 线程会 panic。用 stop_blocking 前的无锁状态判断。
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle().clone();
-                let _ = sysproxy::disable_restore();
+                let _ = proxy_util::disable();
                 let running = core_snapshot(&app).running;
                 if running {
                     // 走 KernelState 的 std 侧清理: spawn 一个阻塞任务杀进程树
@@ -626,15 +709,24 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 let (orphan, stale) = boot_note;
                 if orphan > 0 {
-                    let _ = win.emit("log", format!("[{}] 启动时清理了 {orphan} 个残留 sing-box 进程", now_hms()));
+                    let _ = win.emit(
+                        "log",
+                        format!("[{}] 启动时清理了 {orphan} 个残留 sing-box 进程", now_hms()),
+                    );
                 }
                 if stale {
-                    let _ = win.emit("log", format!("[{}] 检测到系统代理残留（上次异常退出），已自动清除", now_hms()));
+                    let _ = win.emit(
+                        "log",
+                        format!(
+                            "[{}] 检测到系统代理残留（上次异常退出），已自动清除",
+                            now_hms()
+                        ),
+                    );
                 }
             }
         }
         if let tauri::RunEvent::ExitRequested { .. } = event {
-            let _ = sysproxy::disable_restore();
+            let _ = proxy_util::disable();
             // 退出钩子在主线程，绝不能 blocking_lock tokio Mutex → 按 pid 直接杀进程树
             if let Some(pid) = core_snapshot(app).pid {
                 if pid > 0 {
@@ -650,16 +742,6 @@ pub fn run() {
 }
 
 fn main() {
-    configure_webview_proxy();
-    // WebView2 用户数据目录重定向到 exe 旁，便携版数据不落系统盘。
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let wv = dir.join("data").join("webview");
-            if std::fs::create_dir_all(&wv).is_ok() {
-                std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &wv);
-            }
-        }
-    }
     diag("launch: main entered");
     // 兜底 panic 钩子 —— panic 消息也写进诊断日志
     std::panic::set_hook(Box::new(move |info| {

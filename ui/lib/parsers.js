@@ -344,7 +344,11 @@ function parseBase64Subscription(text) {
 
 // ---------- clash yaml 订阅 ----------
 function parseClashSubscription(yamlText) {
-  const yaml = require('js-yaml')
+  // 浏览器态: loader.js 把 'js-yaml' 映射到全局 jsYaml(vendored js-yaml.min.js)
+  // Node 态(单测): 直接 require 同目录 vendored UMD 文件，免 npm 依赖
+  const yaml = typeof globalThis.jsYaml !== 'undefined'
+    ? globalThis.jsYaml
+    : require('./js-yaml.min.js')
   let doc
   try { doc = yaml.load(yamlText) } catch { return [] }
   if (!doc || !Array.isArray(doc.proxies)) return []

@@ -1,100 +1,15 @@
-// 系统代理注册表操作 + 端口检测 + kernel check 的无 GUI 集成冒烟
+// 端口检测 + kernel check 的无 GUI 集成冒烟
 // 用法: cargo test --manifest-path src-tauri/Cargo.toml --test smoke -- --nocapture
-// （不依赖 WebView；真实注册表 HKCU 操作，测完恢复）
+// （不依赖 WebView）
 
-#[path = "../src/sysproxy.rs"]
-mod sysproxy;
+#[path = "../src/configbuilder.rs"]
+mod configbuilder;
 #[path = "../src/kernel.rs"]
 mod kernel;
 #[path = "../src/paths.rs"]
 mod paths;
 #[path = "../src/store.rs"]
 mod store;
-#[path = "../src/configbuilder.rs"]
-mod configbuilder;
-
-#[test]
-fn sysproxy_registry_roundtrip() {
-    // 1. 现状
-    let before = sysproxy::status();
-    println!("[t] before: enabled={} server={:?} ours={}", before.enabled, before.server, before.ours);
-
-    // 2. enable（测试端口 59998）
-    let r = sysproxy::enable(59998).expect("enable failed");
-    println!("[t] enabled via {} → {}", r.via, r.server);
-    let s = sysproxy::status();
-    // 写入失败判定: 无论走 winreg 还是 elevate，注册表 ProxyServer 必须真的变成我们写的值。
-    // 受限会话下 HKCU 直写被 ACL 拒 + UAC 子进程被会话限制 → 提权"成功"但值没变。
-    let wrote = s.enabled && s.server == "127.0.0.1:59998";
-    if !wrote {
-        println!(
-            "[t] SKIP: 本会话无法写 HKCU（via={}），当前 server={:?}（可能是他程序设置的代理），桌面环境不受影响",
-            r.via, s.server
-        );
-        // 只清我们自己的标记，绝不动别人的代理
-        let _ = sysproxy::disable_restore();
-        return;
-    }
-    assert!(s.ours, "after our own write, ours must be true");
-
-    // 3. 残留检测应清理（内核未运行场景）
-    let cleaned = sysproxy::cleanup_stale(59998);
-    assert!(cleaned, "stale cleanup should fire");
-    let s2 = sysproxy::status();
-    // 恢复到 before 的样子（原本没开 → 关；原本有代理 → 应该恢复回去）
-    if before.enabled && !before.server.is_empty() {
-        assert!(s2.enabled, "should restore previous proxy");
-        assert_eq!(s2.server, before.server, "should restore previous ProxyServer");
-    } else {
-        assert!(!s2.enabled, "should be disabled after cleanup");
-    }
-
-    // 4. 恢复原状
-    let _ = sysproxy::disable_restore();
-    let after = sysproxy::status();
-    println!("[t] after: enabled={} server={:?}", after.enabled, after.server);
-    if !before.enabled {
-        assert!(!after.enabled);
-    }
-    println!("[t] sysproxy roundtrip ✅");
-}
-
-#[test]
-fn sysproxy_never_touches_foreign_proxy() {
-    // 关键回归: 用户开着 Clash(127.0.0.1:7890) 系统代理时，yunting disconnect 绝不能把它关掉。
-    // 语义: 没有我们的 marker → disable_restore 不碰注册表。
-    // 用独立数据目录隔离 marker 文件。
-    let iso = smoke_tmp_dir("sysproxy-foreign");
-    let _ = std::fs::remove_dir_all(&iso);
-    std::fs::create_dir_all(&iso).unwrap();
-    std::env::set_var("YUNTING_DATA_DIR", &iso);
-
-    // 若本机当前系统代理不是"我们的"，disable_restore 必须是 no-op
-    let before = sysproxy::status();
-    println!("[t] before: enabled={} server={:?} ours={}", before.enabled, before.server, before.ours);
-    if before.ours {
-        // 上一轮测试留下 marker（真实目录被复用的情况）→ 清掉再验
-        sysproxy::disable_restore().ok();
-    }
-    let after_pre = sysproxy::status();
-    if after_pre.enabled && !after_pre.ours {
-        // 当前是外部程序设的代理 → 调 disable_restore 必须不改动它
-        let r = sysproxy::disable_restore();
-        println!("[t] disable_restore on foreign proxy: {:?}", r);
-        let after = sysproxy::status();
-        assert!(after.enabled, "must NOT disable a proxy we did not set");
-        assert_eq!(after.server, after_pre.server, "must NOT rewrite foreign ProxyServer");
-        println!("[t] 外部代理保持不变 ✅ ({}→{})", after_pre.server, after.server);
-    } else if !after_pre.enabled {
-        // 当前没有代理 → disable_restore 也应保持关闭
-        let _ = sysproxy::disable_restore();
-        assert!(!sysproxy::status().enabled);
-        println!("[t] 无代理时 disable_restore 保持关闭 ✅");
-    } else {
-        println!("[t] 当前是自带 marker 的自有代理，跳过分支验证（由 roundtrip 测试覆盖）");
-    }
-    println!("[t] sysproxy foreign-proxy safety ✅");
-}
 
 #[test]
 fn port_detection() {
@@ -102,12 +17,18 @@ fn port_detection() {
     // 占一个端口 → port_busy 应报 true
     let l = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
     let port = l.local_addr().unwrap().port();
-    assert!(TcpListener::bind(("127.0.0.1", port)).is_err(), "second bind should fail");
+    assert!(
+        TcpListener::bind(("127.0.0.1", port)).is_err(),
+        "second bind should fail"
+    );
     let busy = TcpListener::bind(("127.0.0.1", port)).is_err();
     assert!(busy);
     drop(l);
     // 释放后可绑
-    assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "free port should bind");
+    assert!(
+        TcpListener::bind(("127.0.0.1", port)).is_ok(),
+        "free port should bind"
+    );
     println!("[t] port busy detection ✅ (port {port})");
 }
 
@@ -162,11 +83,20 @@ fn kernel_check_config() {
 fn configbuilder_rejects_out_of_range_port() {
     // 超 uint16 范围的节点端口应被拒绝（sing-box 解码 config 时直接 FATAL）
     let bad = serde_json::json!({ "tag": "BAD", "type": "ss", "server": "1.2.3.4", "server_port": 70000, "method": "aes-256-gcm", "password": "x" });
-    assert!(configbuilder::node_to_outbound(&bad).is_none(), "port 70000 must be rejected");
+    assert!(
+        configbuilder::node_to_outbound(&bad).is_none(),
+        "port 70000 must be rejected"
+    );
     let good = serde_json::json!({ "tag": "OK", "type": "ss", "server": "1.2.3.4", "server_port": 65535, "method": "aes-256-gcm", "password": "x" });
-    assert!(configbuilder::node_to_outbound(&good).is_some(), "port 65535 must be accepted");
+    assert!(
+        configbuilder::node_to_outbound(&good).is_some(),
+        "port 65535 must be accepted"
+    );
     let zero = serde_json::json!({ "tag": "Z", "type": "ss", "server": "1.2.3.4", "server_port": 0, "method": "aes-256-gcm", "password": "x" });
-    assert!(configbuilder::node_to_outbound(&zero).is_none(), "port 0 must be rejected");
+    assert!(
+        configbuilder::node_to_outbound(&zero).is_none(),
+        "port 0 must be rejected"
+    );
     println!("[t] configbuilder port range ✅");
 }
 
@@ -213,9 +143,16 @@ fn data_dir_fallback_when_appdata_unwritable() {
 
     // 调用纯逻辑版本，显式注入不可用的 APPDATA
     let exe_dir = paths::exe_dir();
-    let d = paths::resolve_data_dir_with(Some(String::new()), Some(bogus.to_string_lossy().to_string()), &exe_dir);
+    let d = paths::resolve_data_dir_with(
+        Some(String::new()),
+        Some(bogus.to_string_lossy().to_string()),
+        &exe_dir,
+    );
     let unusable = bogus.join("yunting");
-    assert_ne!(d, unusable, "must never resolve to the unusable APPDATA\\yunting");
+    assert_ne!(
+        d, unusable,
+        "must never resolve to the unusable APPDATA\\yunting"
+    );
     let probe = d.join(".wprobe");
     assert!(
         std::fs::write(&probe, b"x").is_ok(),
@@ -239,7 +176,10 @@ fn kernel_status_readable_from_any_context() {
     assert_eq!(s.pid, None);
     assert_eq!(s.phase, "stopped");
     // runtime 上下文（这里若内部用 tokio Mutex 且 blocking_lock 就会 panic）
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async {
         let s2 = status.snapshot();
         assert!(!s2.running);
@@ -250,7 +190,10 @@ fn kernel_status_readable_from_any_context() {
 
 /// 测试工作目录: 项目 target/smoke-tmp/<name>（temp_dir 在受限会话+非 ASCII 用户名下拒写）
 fn smoke_tmp_dir(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("smoke-tmp").join(name)
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("smoke-tmp")
+        .join(name)
 }
 
 #[tokio::test]
@@ -309,14 +252,22 @@ async fn kernel_lifecycle() {
     let version_body = {
         use std::io::{Read, Write};
         let mut s = std::net::TcpStream::connect(("127.0.0.1", api_port)).expect("connect api");
-        let req = format!("GET /version HTTP/1.1\r\nHost: 127.0.0.1:{api_port}\r\nConnection: close\r\n\r\n");
+        let req = format!(
+            "GET /version HTTP/1.1\r\nHost: 127.0.0.1:{api_port}\r\nConnection: close\r\n\r\n"
+        );
         s.write_all(req.as_bytes()).expect("write req");
         let mut buf = String::new();
         s.read_to_string(&mut buf).expect("read resp");
         buf
     };
-    println!("[t] clash api raw: {}", version_body.lines().next().unwrap_or(""));
-    assert!(version_body.contains("sing-box"), "version should mention sing-box");
+    println!(
+        "[t] clash api raw: {}",
+        version_body.lines().next().unwrap_or("")
+    );
+    assert!(
+        version_body.contains("sing-box"),
+        "version should mention sing-box"
+    );
 
     // 停止 → 端口应释放
     km.stop().await.expect("stop failed");
@@ -327,7 +278,8 @@ async fn kernel_lifecycle() {
 }
 
 #[test]
-fn store_roundtrip_and_corrupt_recovery() {    // store 默认用 %APPDATA%\yunting；受限会话下该目录可能拒写 → 测试用 YUNTING_DATA_DIR 隔离
+fn store_roundtrip_and_corrupt_recovery() {
+    // store 默认用 %APPDATA%\yunting；受限会话下该目录可能拒写 → 测试用 YUNTING_DATA_DIR 隔离
     // （不污染真实用户数据；默认路径策略另由真实环境验证）
     // 注意: paths::data_dir() 用 OnceLock 缓存，本测试必须先设置 YUNTING_DATA_DIR 再首次访问
     let iso = smoke_tmp_dir("store");
@@ -337,7 +289,10 @@ fn store_roundtrip_and_corrupt_recovery() {    // store 默认用 %APPDATA%\yunt
     let d = paths::data_dir();
     assert!(d.exists() && d.is_dir());
     let probe = d.join("diag-probe.txt");
-    assert!(std::fs::write(&probe, b"x").is_ok(), "isolated data dir must be writable");
+    assert!(
+        std::fs::write(&probe, b"x").is_ok(),
+        "isolated data dir must be writable"
+    );
     let _ = std::fs::remove_file(&probe);
     let s0 = store::load_settings();
     println!("[t] settings: {:?}", s0);
@@ -357,7 +312,13 @@ fn store_roundtrip_and_corrupt_recovery() {    // store 默认用 %APPDATA%\yunt
     // 损坏 JSON → 备份 .corrupt 并回默认，不 panic 不丢现场
     std::fs::write(d.join("settings.json"), b"{ not json !!!").unwrap();
     let s4 = store::load_settings();
-    assert_eq!(s4.mixed_port, 7890, "corrupt settings should fall back to default");
-    assert!(d.join("settings.json.corrupt").exists(), "corrupt file should be preserved");
+    assert_eq!(
+        s4.mixed_port, 7890,
+        "corrupt settings should fall back to default"
+    );
+    assert!(
+        d.join("settings.json.corrupt").exists(),
+        "corrupt file should be preserved"
+    );
     println!("[t] store roundtrip + corrupt recovery ✅");
 }

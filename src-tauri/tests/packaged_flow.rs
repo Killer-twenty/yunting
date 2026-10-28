@@ -1,11 +1,11 @@
 // 打包目录功能等价冒烟：用便携目录内的 kernel 跑 sing-box check + config 生成
 // 验证打包产物的 kernel/srs/configbuilder 组合可用（不依赖 WebView）
-#[path = "../src/paths.rs"]
-mod paths;
 #[path = "../src/configbuilder.rs"]
 mod configbuilder;
 #[path = "../src/kernel.rs"]
 mod kernel;
+#[path = "../src/paths.rs"]
+mod paths;
 
 #[test]
 fn packaged_dir_kernel_full_flow() {
@@ -34,14 +34,16 @@ fn packaged_dir_kernel_full_flow() {
     .unwrap();
     let nodes = fixture["nodes"].as_array().unwrap().clone();
     // HK-Reality 的 public_key "PBK" 是单测占位假钥，sing-box check 会拒 —— 换合法 base64 密钥
+    // （随机生成的 32 字节 X25519 形态公钥，仅用于本地 config 校验，非真实凭据）
     let mut nodes = nodes;
     if let Some(vless) = nodes.iter_mut().find(|n| n["type"] == "vless") {
-        // 真实 32 字节 X25519 base64 公钥（用户 VPS 凭据，旧版端到端验证过）
-        vless["tls"]["reality"]["public_key"] = serde_json::json!("ZGjfhu5sFfLhNdkk4D2rN8B9O9d_0043mcszsyCCaHU");
+        vless["tls"]["reality"]["public_key"] =
+            serde_json::json!("ZGjfhu5sFfLhNdkk4D2rN8B9O9d_0043mcszsyCCaHU");
     }
     let selected = fixture["selectedTag"].as_str().map(|s| s.to_string());
 
-    let cfg = configbuilder::build_config(&nodes, &selected, 20808, 9090, "rule", &[]).expect("build config");
+    let cfg = configbuilder::build_config(&nodes, &selected, 20808, 9090, "rule", &[])
+        .expect("build config");
     // check 必须过（用打包目录内核 + 打包目录里的 srs —— rule_set path 应指向打包目录的 kernel）
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

@@ -91,10 +91,18 @@ pub struct Settings {
     pub direct_list: Vec<String>,
 }
 
-fn d_mixed_port() -> u16 { 7890 }
-fn d_api_port() -> u16 { 9090 }
-fn d_auto_proxy() -> bool { true }
-fn d_route_mode() -> String { "rule".into() }
+fn d_mixed_port() -> u16 {
+    7890
+}
+fn d_api_port() -> u16 {
+    9090
+}
+fn d_auto_proxy() -> bool {
+    true
+}
+fn d_route_mode() -> String {
+    "rule".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {

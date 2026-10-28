@@ -1,5 +1,6 @@
 [package]
 name = "yunting"
+default-run = "yunting"
 version = "0.1.0"
 description = "yunting - Windows 桌面代理加速器 (Tauri 2.x + sing-box)"
 authors = ["YG"]
@@ -11,18 +12,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "net", "io-util", "sync"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 uuid = { version = "1", features = ["v4"] }
-windows = { version = "0.58", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_Registry",
-] }
 
 [profile.dev]
 opt-level = 1

@@ -209,10 +209,10 @@ function renderState(s) {
   $('btnTestAll').title = state.reloading ? '节点列表更新中，请稍候' : ''
   // 设置页系统代理状态
   if (state.proxy) {
-    $('proxyStateText').textContent = state.proxy.enabled
+    $('proxyStateText').textContent = state.proxy.enable
       ? `已开启 → ${state.proxy.server}${state.proxy.ours ? '' : '（他程序设置）'}`
       : '已关闭'
-    $('btnSysProxy').textContent = state.proxy.enabled ? '关系统代理' : '开系统代理'
+    $('btnSysProxy').textContent = state.proxy.enable ? '关系统代理' : '开系统代理'
   }
 }
 
@@ -438,7 +438,7 @@ $('btnSubAdd').onclick = async () => {
 }
 
 $('btnSysProxy').onclick = async () => {
-  const on = !(state.proxy && state.proxy.enabled)
+  const on = !(state.proxy && state.proxy.enable)
   try { renderState({ proxy: await api.setSystemProxy(on) }) }
   catch (e) {
     const m = errText(e)

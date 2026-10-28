@@ -141,7 +141,11 @@ fn local_rule_set(name: &str) -> Value {
     if file.exists() {
         return json!({ "type": "local", "tag": name, "format": "binary", "path": file.to_string_lossy() });
     }
-    let (dir, file) = if name == "geosite-cn" { ("geosite", "cn.srs") } else { ("geoip", "cn.srs") };
+    let (dir, file) = if name == "geosite-cn" {
+        ("geosite", "cn.srs")
+    } else {
+        ("geoip", "cn.srs")
+    };
     json!({
         "type": "remote",
         "tag": name,
@@ -209,30 +213,54 @@ pub fn node_to_outbound(node: &Value) -> Option<Value> {
                     v.clone()
                 };
             }
-            if let Some(v) = node.get("transport") { ob["transport"] = v.clone(); }
+            if let Some(v) = node.get("transport") {
+                ob["transport"] = v.clone();
+            }
         }
         "vmess" => {
             ob["uuid"] = node.get("uuid").cloned().unwrap_or(Value::Null);
-            ob["security"] = json!(node.get("security").and_then(|v| v.as_str()).unwrap_or("auto"));
-            if let Some(v) = node.get("alter_id") { ob["alter_id"] = v.clone(); }
-            if let Some(v) = node.get("tls") { ob["tls"] = v.clone(); }
-            if let Some(v) = node.get("transport") { ob["transport"] = v.clone(); }
+            ob["security"] = json!(node
+                .get("security")
+                .and_then(|v| v.as_str())
+                .unwrap_or("auto"));
+            if let Some(v) = node.get("alter_id") {
+                ob["alter_id"] = v.clone();
+            }
+            if let Some(v) = node.get("tls") {
+                ob["tls"] = v.clone();
+            }
+            if let Some(v) = node.get("transport") {
+                ob["transport"] = v.clone();
+            }
         }
         "trojan" => {
             ob["password"] = node.get("password").cloned().unwrap_or(Value::Null);
-            if let Some(v) = node.get("tls") { ob["tls"] = v.clone(); }
-            if let Some(v) = node.get("transport") { ob["transport"] = v.clone(); }
+            if let Some(v) = node.get("tls") {
+                ob["tls"] = v.clone();
+            }
+            if let Some(v) = node.get("transport") {
+                ob["transport"] = v.clone();
+            }
         }
         "ss" => {
             ob["method"] = node.get("method").cloned().unwrap_or(Value::Null);
             ob["password"] = node.get("password").cloned().unwrap_or(Value::Null);
-            if let Some(v) = node.get("plugin") { ob["plugin"] = v.clone(); }
-            if let Some(v) = node.get("plugin_opts") { ob["plugin_opts"] = v.clone(); }
+            if let Some(v) = node.get("plugin") {
+                ob["plugin"] = v.clone();
+            }
+            if let Some(v) = node.get("plugin_opts") {
+                ob["plugin_opts"] = v.clone();
+            }
         }
         "hysteria2" => {
             ob["password"] = node.get("password").cloned().unwrap_or(Value::Null);
-            if let Some(v) = node.get("obfs") { ob["obfs"] = v.clone(); }
-            ob["tls"] = node.get("tls").cloned().unwrap_or_else(|| json!({ "enabled": true }));
+            if let Some(v) = node.get("obfs") {
+                ob["obfs"] = v.clone();
+            }
+            ob["tls"] = node
+                .get("tls")
+                .cloned()
+                .unwrap_or_else(|| json!({ "enabled": true }));
         }
         _ => return None,
     }

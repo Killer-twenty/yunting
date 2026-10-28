@@ -1,20 +1,34 @@
+# Package/build outputs
 node_modules/
 dist/
 release/
 src-tauri/target/
+
+# Local runtime data / caches
+data/
 .cache/
-*.txt
+.verify-*/
+_audit-baseline/
+
+# Temp / logs / diagnostics
 *.log
+*.tmp
+*.old
 *.dmp
+
+# Local binaries/symbols
 *.exe
+*.pdb
+
+# Local or sensitive config snapshots
+config.json
+nodes.json
+settings.json
+*.local.json
+
+# Kernel artifacts (keep only doc)
 kernel/*.zip
 kernel/*.md
 !kernel/README.md
 kernel/*.exe
 kernel/*.srs
-.verify-*/
-data/electron/
-data/config.json
-data/cache.db
-data/main-diag.log
-_audit-baseline/

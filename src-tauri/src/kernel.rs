@@ -48,7 +48,11 @@ impl KernelStatus {
             running,
             pid: *self.pid.lock().unwrap_or_else(|e| e.into_inner()),
             exit_code: *self.exit_code.lock().unwrap_or_else(|e| e.into_inner()),
-            phase: if running { "running".into() } else { "stopped".into() },
+            phase: if running {
+                "running".into()
+            } else {
+                "stopped".into()
+            },
         }
     }
 
@@ -90,7 +94,12 @@ impl KernelManager {
     }
 
     fn log(&self, line: String) {
-        if let Some(tx) = self.log_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(tx) = self
+            .log_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             let _ = tx.send(line);
         }
     }
@@ -107,13 +116,19 @@ impl KernelManager {
             return Err(format!("内核不存在: {}", exe.display()));
         }
         let mut cmd = Command::new(exe);
-        cmd.args(["run", "-c", &cfg.to_string_lossy(), "-D", &work_dir.to_string_lossy()])
-            .current_dir(work_dir)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .creation_flags_hide()
-            .kill_on_drop(true); // guard 丢失时自动杀进程，防孤儿
+        cmd.args([
+            "run",
+            "-c",
+            &cfg.to_string_lossy(),
+            "-D",
+            &work_dir.to_string_lossy(),
+        ])
+        .current_dir(work_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .creation_flags_hide()
+        .kill_on_drop(true); // guard 丢失时自动杀进程，防孤儿
         let mut child = cmd.spawn().map_err(|e| format!("内核启动失败: {e}"))?;
         let pid = child.id().unwrap_or(0);
         self.log(format!("内核已启动 pid={pid}"));
@@ -167,7 +182,12 @@ impl KernelManager {
     }
 
     fn log_sender(&self) -> mpsc::UnboundedSender<String> {
-        if let Some(tx) = self.log_tx.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if let Some(tx) = self
+            .log_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
             tx.clone()
         } else {
             // 无订阅者: 丢弃日志
@@ -273,7 +293,8 @@ fn kill_process_tree(pid: u32) {
 /// config 校验（sing-box check -c）
 pub fn check_config(exe: &Path, cfg: &Path) -> Result<(), String> {
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["check", "-c", &cfg.to_string_lossy()]).stdin(Stdio::null());
+    cmd.args(["check", "-c", &cfg.to_string_lossy()])
+        .stdin(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -281,7 +302,10 @@ pub fn check_config(exe: &Path, cfg: &Path) -> Result<(), String> {
     }
     let out = cmd.output().map_err(|e| format!("check 执行失败: {e}"))?;
     if !out.status.success() {
-        return Err(format!("config 校验失败: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "config 校验失败: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     Ok(())
 }
@@ -293,7 +317,9 @@ pub fn wait_api_ready(port: u16, timeout: Duration) -> Result<(), String> {
     loop {
         if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", port)) {
             let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-            let req = format!("GET /version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+            let req = format!(
+                "GET /version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            );
             if stream.write_all(req.as_bytes()).is_ok() {
                 let mut buf = [0u8; 512];
                 if let Ok(n) = stream.read(&mut buf) {
@@ -308,6 +334,20 @@ pub fn wait_api_ready(port: u16, timeout: Duration) -> Result<(), String> {
             return Err("clash api 就绪超时".into());
         }
         std::thread::sleep(Duration::from_millis(300));
+    }
+}
+
+/// 等待 mixed 代理端口开始监听，确保系统代理不会指向尚未启动的端口。
+pub fn wait_port_ready(port: u16, timeout: Duration) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(format!("mixed 代理端口 {port} 就绪超时"));
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -334,8 +374,12 @@ pub fn cleanup_orphans() -> u32 {
     let text = String::from_utf8_lossy(&out.stdout);
     let mut killed = 0;
     for line in text.lines() {
-        let Some((pid_str, cmdline)) = line.split_once('|') else { continue };
-        let Ok(pid) = pid_str.trim().parse::<u32>() else { continue };
+        let Some((pid_str, cmdline)) = line.split_once('|') else {
+            continue;
+        };
+        let Ok(pid) = pid_str.trim().parse::<u32>() else {
+            continue;
+        };
         if cmdline.to_lowercase().contains(&my_kernel_str) {
             kill_process_tree(pid);
             killed += 1;

@@ -38,7 +38,11 @@ pub fn resolve_data_dir() -> PathBuf {
 }
 
 /// 可注入参数的纯逻辑（便于测试，不依赖进程全局环境变量）
-pub fn resolve_data_dir_with(override_dir: Option<String>, appdata: Option<String>, exe_dir: &Path) -> PathBuf {
+pub fn resolve_data_dir_with(
+    override_dir: Option<String>,
+    appdata: Option<String>,
+    exe_dir: &Path,
+) -> PathBuf {
     if let Some(o) = override_dir {
         if !o.trim().is_empty() {
             let d = PathBuf::from(o);
