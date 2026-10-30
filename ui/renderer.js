@@ -772,6 +772,7 @@ async function loadSettings() {
   $('setApiPort').value = state.settings.clashApiPort
   $('chkAutoProxy').checked = !!state.settings.autoSystemProxy
   $('setRouteMode').value = state.settings.routeMode || 'rule'
+  $('setCloseBehavior').value = state.settings.closeBehavior || 'quit'
   updateRouteModeHint()
   renderDirectList()
 }
@@ -866,6 +867,7 @@ async function saveSettings(extra = {}) {
       mixedPort, clashApiPort,
       autoSystemProxy: $('chkAutoProxy').checked,
       routeMode: $('setRouteMode').value,
+      closeBehavior: $('setCloseBehavior').value || 'quit',
       ...extra,
     })
     renderDirectList()
@@ -959,10 +961,38 @@ $('setPort').onchange = () => saveSettings()
 $('setApiPort').onchange = () => saveSettings()
 $('chkAutoProxy').onchange = () => saveSettings()
 $('setRouteMode').onchange = () => { updateRouteModeHint(); saveSettings() }
+$('setCloseBehavior').onchange = () => saveSettings()
 
 // ---------- 主进程事件 ----------
 api.onLog(log)
 api.onState(renderState)
+
+// ---------- 关闭行为询问对话框 ----------
+function closeWith(behavior, remember) {
+  if (remember) {
+    // 记住选择：更新后端设置（closeBehavior 改为 tray/quit，之后点 × 不再询问）
+    const settings = state.settings || {}
+    saveSettings({ ...settings, closeBehavior: behavior })
+      .then(() => {
+        if (behavior === 'tray') { $('dlgClose').close(); api.hideWindow(); log('[gui] 已记住：点击 × 最小化到托盘') }
+        else { $('dlgClose').close(); api.quitApp() }
+      })
+      .catch((e) => { toast(errText(e), true); })
+  } else {
+    $('dlgClose').close()
+    if (behavior === 'tray') { api.hideWindow(); log('[gui] 已最小化到托盘（未记住）') }
+    else { api.quitApp() }
+  }
+}
+api.onCloseAsked(() => {
+  if (!$('dlgClose').open) $('dlgClose').showModal()
+})
+$('btnCloseTray').onclick = () => closeWith('tray', $('chkRememberClose').checked)
+$('btnCloseQuit').onclick = () => closeWith('quit', $('chkRememberClose').checked)
+$('dlgClose').addEventListener('cancel', (e) => {
+  // Esc 关闭对话框 = 取消操作（保持运行、窗口可见）
+  e.preventDefault()
+})
 
 // ---------- 初始化 ----------
 ;(async function init() {

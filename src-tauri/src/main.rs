@@ -727,6 +727,9 @@ fn settings_save(s: Settings) -> Result<Settings, String> {
     if !["rule", "global"].contains(&s.route_mode.as_str()) {
         return Err(format!("未知分流模式: {}", s.route_mode));
     }
+    if !["ask", "quit", "tray"].contains(&s.close_behavior.as_str()) {
+        return Err(format!("未知关闭行为: {}", s.close_behavior));
+    }
     if s.mixed_port == 0 || s.clash_api_port == 0 {
         return Err("端口不能为 0".into());
     }
@@ -837,6 +840,79 @@ fn configure_webview_proxy() {
 }
 
 // ============================================================
+// 托盘
+// ============================================================
+/// 构建系统托盘：显示/退出 两个菜单项（点击图标 = 显示窗口）
+fn init_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let show = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(app.default_window_icon().cloned().unwrap())
+        .tooltip("yunting")
+        .menu(&menu)
+        .show_menu_on_left_click(false) // 左键=显示窗口，右键=菜单（Windows 惯例）
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.set_focus();
+                }
+            }
+            "quit" => {
+                app.exit(0); // 走 ExitRequested 清理链（撤代理 + 杀内核）
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(win) = tray.app_handle().get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.unminimize();
+                    let _ = win.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// 前端托盘菜单「退出」调用（等价于 app.exit，但给日志面板留一条记录）
+#[tauri::command]
+fn app_quit(app: AppHandle) {
+    log_line(&app, "托盘退出：关闭内核并清理系统代理…");
+    app.exit(0);
+}
+
+/// 恢复显示主窗口（托盘菜单/对话框按钮用）
+#[tauri::command]
+fn window_show(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// 隐藏主窗口到托盘（关闭行为对话框选"最小化"时用）
+#[tauri::command]
+fn window_hide(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
+    }
+}
+
+// ============================================================
 // 入口
 // ============================================================
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -855,11 +931,17 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.unminimize();
+                let _ = win.show();
                 let _ = win.set_focus();
             }
         }))
         .manage(KernelState(Mutex::new(km)))
         .manage(KernelStatusHandle(status))
+        .setup(|app| {
+            diag("run: setup（构建托盘）");
+            init_tray(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             nodes_get,
             nodes_add,
@@ -880,8 +962,31 @@ pub fn run() {
             settings_save,
             diag_paths,
             fetch_text,
+            app_quit,
+            window_show,
+            window_hide,
         ])
         .on_window_event(|window, event| {
+            // 点 × 的拦截：
+            //   quit → 放行（走 Destroyed 清理链）
+            //   tray → 隐藏到托盘
+            //   ask  → 阻止关闭 + 发 "close-asked" 事件，前端弹自定义对话框
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                match load_settings().close_behavior.as_str() {
+                    "tray" => {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        diag("close: hidden to tray (close_behavior=tray)");
+                    }
+                    "ask" => {
+                        api.prevent_close();
+                        let _ = window.emit("close-asked", ());
+                        diag("close: ask dialog emitted");
+                    }
+                    _ => {} // quit：放行
+                }
+                return;
+            }
             // 窗口销毁时同步清理底层资源（注册表恢复 + 停内核）
             // 注意: 这里绝不能 blocking_lock tokio Mutex —— 不在 runtime 上下文但拿不到锁会死锁，
             //      且若恰好处于 runtime 线程会 panic。用 stop_blocking 前的无锁状态判断。

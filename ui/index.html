@@ -41,6 +41,7 @@
       --shadow-xs: 0 1px 2px rgba(48, 49, 51, 0.04);
       --shadow-sm: 0 2px 8px rgba(48, 49, 51, 0.06);
       --shadow-md: 0 6px 20px rgba(48, 49, 51, 0.09);
+      --shadow-lg: 0 12px 32px rgba(48, 49, 51, 0.16);
       --radius-sm: 4px; --radius-md: 8px;
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, Arial, sans-serif;
       --font-mono: "Fira Code", "JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace;
@@ -67,6 +68,7 @@
       --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
       --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);
       --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.42);
+      --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
@@ -95,9 +97,14 @@
       background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
     }
     .nav-items { padding: 10px 8px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
-    /* 导航项：整组（图标+文字+徽标）水平居中 */
+    /* 左栏列几何变量：主项与折叠项共用同一套列宽，保证图标列、文字列跨行严格对齐。
+       文字列 65px = 5em@13px（折叠项字号 12px 仍用 65px 列宽，两端对齐才能与主项对齐） */
+    .nav-items, .accel-group { --col-icon: 18px; --col-label: 65px; }
+    /* 导航项：两列网格（图标列 + 文字列），图标与文字解耦各自成列垂直对齐，整组居中。
+       徽标绝对定位悬于右侧空白，不参与列布局 —— 避免"订阅管理"的计数把图标/文字起点挤歪 */
     .nav-item {
-      display: flex; align-items: center; justify-content: center; gap: 8px;
+      display: grid; grid-template-columns: var(--col-icon) var(--col-label); justify-content: center;
+      align-items: center; gap: 8px;
       padding: 9px 12px; border-radius: 8px; cursor: pointer;
       color: var(--fg-dim); font-size: 13px; border: 1px solid transparent; position: relative;
       transition: background .15s, color .15s, border-color .15s;
@@ -107,10 +114,13 @@
       background: var(--nav-active-bg); color: var(--accent); font-weight: 600;
       border-color: var(--border); box-shadow: var(--shadow-xs);
     }
-    .nav-item .icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
-    /* 标签统一拉伸到 5 字宽：四字/五字同宽不错行，"设置"两字左右边缘对齐 */
-    .nav-text { display: inline-block; width: 5em; white-space: nowrap; text-align: justify; text-align-last: justify; }
-    .nav-item .badge { font-size: 11px; color: var(--fg-dim); }
+    .nav-item .icon { font-size: 15px; width: var(--col-icon); text-align: center; flex-shrink: 0; justify-self: center; }
+    /* 标签两端对齐（"设置"两字拉满与四字/五字同宽），宽度由网格列决定 */
+    .nav-text { display: block; width: 100%; white-space: nowrap; text-align: justify; text-align-last: justify; }
+    .nav-item .badge {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      font-size: 11px; color: var(--fg-dim); pointer-events: none;
+    }
     /* 底部连接状态（CFW: 计时 + 核心已运行）——整体居中 */
     .nav-footer { padding: 12px 14px; border-top: 1px solid var(--divider); display: flex; flex-direction: column; align-items: center; gap: 6px; }
     .nav-timer { font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums; letter-spacing: 1px; }
@@ -131,10 +141,8 @@
     .page-header h2 { font-size: 19px; font-weight: 700; }
     .page-header .sub { font-size: 12px; color: var(--fg-dim); }
     /* ============ 加速模式折叠下拉（左栏顶部，展开时把下方导航项往下推） ============ */
-    /* 导航项可见内容组宽度 = icon 18 + gap 8 + label 5em(65px@13px) = 91px
-       箭头要贴在内容组右侧空白，需从居中基线偏移该组半宽（改字号时同步改这里） */
+    /* 箭头不参与布局：绝对定位在内容组（列 18+8+65=91px）右侧空白处，保持不变 */
     .accel-group { --nav-group-w: 91px; display: flex; flex-direction: column; gap: 2px; }
-    /* 箭头不参与布局（绝对定位贴在内容组右侧空白），图标+文字与下方条目对齐 */
     .accel-caret {
       position: absolute; left: calc(50% + var(--nav-group-w) / 2 + 3px); top: 50%;
       transform: translateY(-50%);
@@ -157,18 +165,20 @@
       transform: translateY(0); opacity: 0; pointer-events: none; z-index: 0;
       transition: transform .18s cubic-bezier(.4, 0, .2, 1), opacity .14s;
     }
-    /* 折叠项字体略小于外显主项（12px < 13px），做层次；未实现功能整体置灰 */
+    /* 折叠项：与主项同款两列网格（复用 --col-icon/--col-label，字号小一号），
+       图标/文字各自成列，整组居中 —— 列几何与主项一致保证跨行对齐 */
     .accel-opt {
       position: relative; z-index: 1;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
+      display: grid; grid-template-columns: var(--col-icon) var(--col-label); justify-content: center;
+      align-items: center; gap: 8px;
       height: 28px; padding: 0 10px;
       border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--fg);
       background: transparent; white-space: nowrap;
     }
     .accel-opt.wip { color: var(--fg-dim); }
     .accel-opt.wip .icon { opacity: .55; }
-    .accel-opt .icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
-    .accel-opt .name { text-align: center; flex-shrink: 0; }
+    .accel-opt .icon { font-size: 13px; width: var(--col-icon); text-align: center; flex-shrink: 0; justify-self: center; }
+    .accel-opt .name { text-align: justify; text-align-last: justify; flex-shrink: 0; }
     /* 选中高亮；但 wip（未实现）功能即使选中也保持灰色，只加粗 */
     .accel-opt.current .name { color: var(--accent); font-weight: 600; }
     .accel-opt.wip.current .name { color: var(--fg-dim); }
@@ -384,8 +394,25 @@
     }
     dialog::backdrop { background: rgba(15, 23, 42, .35); }
     dialog h3 { margin-bottom: 10px; font-size: 15px; }
+    /* 关闭询问框：紧凑宽度（原 460px 缩小后扩 1/3 = 368px） */
+    dialog#dlgClose { width: 368px; }
     dialog textarea { height: 130px; resize: vertical; font-family: var(--font-mono); font-size: 12px; }
     dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    /* 关闭询问框专用行：复选框贴左、按钮贴右，同一中线（不受 dialog .row 的 flex-end 影响） */
+    #dlgClose .dlg-close-row {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 8px; margin-top: 4px;
+    }
+    #dlgClose .dlg-close-remember {
+      display: inline-flex; align-items: center; gap: 8px;
+      height: 32px; font-size: 12px; color: var(--fg-dim); cursor: pointer; user-select: none;
+    }
+    #dlgClose .dlg-close-remember input[type=checkbox] {
+      width: 15px; height: 15px; margin: 0; flex-shrink: 0;
+      accent-color: var(--accent); outline: none; box-shadow: none; cursor: pointer;
+    }
+    #dlgClose .dlg-close-remember input[type=checkbox]:focus { outline: none; box-shadow: none; }
+    #dlgClose .dlg-close-actions { display: inline-flex; align-items: center; gap: 8px; }
     .toast {
       position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
       background: var(--card-bg); border: 1px solid var(--border-strong); color: var(--fg);
@@ -568,6 +595,17 @@
             </span>
             <span class="hint">即时生效，无需重启</span>
           </div>
+          <div class="settings-row">
+            <label>关闭行为</label>
+            <span class="cell">
+              <select id="setCloseBehavior" style="width:190px">
+                <option value="ask">点击 × 每次询问</option>
+                <option value="tray">点击 × 最小化到托盘</option>
+                <option value="quit">点击 × 直接退出</option>
+              </select>
+            </span>
+            <span class="hint">托盘左键恢复窗口，右键菜单可退出</span>
+          </div>
         </div>
         <div class="settings-card">
           <h3>系统代理</h3>
@@ -615,6 +653,20 @@
     <div class="row">
       <button id="btnImportCancel">取消</button>
       <button id="btnImportOk" class="primary">导入</button>
+    </div>
+  </dialog>
+
+  <!-- 关闭行为询问 -->
+  <dialog id="dlgClose">
+    <h3>关闭 yunting</h3>
+    <div class="dlg-close-row">
+      <label class="dlg-close-remember" for="chkRememberClose">
+        <input type="checkbox" id="chkRememberClose" />记住我的选择
+      </label>
+      <span class="dlg-close-actions">
+        <button id="btnCloseQuit">退出</button>
+        <button id="btnCloseTray" class="primary">最小化到托盘</button>
+      </span>
     </div>
   </dialog>
 

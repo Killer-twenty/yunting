@@ -79,6 +79,12 @@
     onLog: (cb) => listen('log', (e) => cb(e.payload)),
     onState: (cb) => listen('state', (e) => cb(e.payload)),
 
+    // ---------- 托盘/窗口 ----------
+    quitApp: () => invoke('app_quit'),
+    showWindow: () => invoke('window_show'),
+    hideWindow: () => invoke('window_hide'),
+    onCloseAsked: (cb) => listen('close-asked', () => cb()),
+
     // ---------- 节点详情（纯函数，前端本地执行） ----------
     nodeToLink: (node) => parsers.nodeToShareLink(node),
   }

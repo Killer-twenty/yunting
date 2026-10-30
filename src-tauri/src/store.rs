@@ -89,6 +89,9 @@ pub struct Settings {
     pub route_mode: String,
     #[serde(default)]
     pub direct_list: Vec<String>,
+    /// 点击窗口 × 的行为: "ask"(每次询问, 默认) | "tray"(最小化到托盘) | "quit"(直接退出)
+    #[serde(default = "d_close_behavior")]
+    pub close_behavior: String,
 }
 
 fn d_mixed_port() -> u16 {
@@ -103,6 +106,9 @@ fn d_auto_proxy() -> bool {
 fn d_route_mode() -> String {
     "rule".into()
 }
+fn d_close_behavior() -> String {
+    "ask".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -112,6 +118,7 @@ impl Default for Settings {
             auto_system_proxy: true,
             route_mode: "rule".into(),
             direct_list: Vec::new(),
+            close_behavior: "ask".into(),
         }
     }
 }
