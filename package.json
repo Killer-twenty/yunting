@@ -2,7 +2,7 @@
   "$schema": "https://schema.npmjs.org/package.json",
   "name": "yunting",
   "productName": "yunting",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "yunting - Windows 桌面代理加速器 (Tauri 2.x + sing-box)",
   "author": "YG",
   "private": true,
