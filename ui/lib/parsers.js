@@ -457,6 +457,124 @@ function dedupeNodes(nodes) {
   return out
 }
 
+// ---------- 节点 → 分享链接（反推，供详情抽屉展示；有 raw 直接用） ----------
+// 纯 JS base64 编码（不依赖 Buffer/btoa，Node 与 WebView 双环境一致）
+function b64encode(str) {
+  const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const bytes = []
+  for (let i = 0; i < str.length; i++) {
+    const cp = str.codePointAt(i)
+    if (cp > 0xffff) i++
+    if (cp < 0x80) bytes.push(cp)
+    else if (cp < 0x800) bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 63))
+    else if (cp < 0x10000) bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63))
+    else bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63))
+  }
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i], b1 = bytes[i + 1], b2 = bytes[i + 2]
+    out += B64[b0 >> 2]
+    out += B64[((b0 & 3) << 4) | ((b1 === undefined ? 0 : b1) >> 4)]
+    out += b1 === undefined ? '=' : B64[((b1 & 15) << 2) | ((b2 === undefined ? 0 : b2) >> 6)]
+    out += b2 === undefined ? '=' : B64[b2 & 63]
+  }
+  return out
+}
+
+/** 从节点对象重建分享链接（clash yaml 解析出的节点没有 raw 时用） */
+function nodeToShareLink(node) {
+  if (!node) return ''
+  if (node.raw) return node.raw
+  const host = String(node.server || '')
+  const port = node.server_port || 0
+  // 分享链接用原始名（改名只动外显，不污染链接）；无 raw 节点回退 tag
+  const linkName = node.origTag || node.tag
+  const frag = linkName ? '#' + encodeURIComponent(linkName) : ''
+  const tls = node.tls || {}
+  const tr = node.transport || {}
+  const params = {}
+  if (tls.enabled || tls.reality) {
+    if (tls.reality && tls.reality.enabled) {
+      params.security = 'reality'
+      if (tls.reality.public_key) params.pbk = tls.reality.public_key
+      if (tls.reality.short_id) params.sid = tls.reality.short_id
+      params.fp = (tls.utls && tls.utls.fingerprint) || 'chrome'
+      if (tls.server_name) params.sni = tls.server_name
+    } else {
+      params.security = 'tls'
+      if (tls.server_name) params.sni = tls.server_name
+      if (tls.alpn && tls.alpn.length) params.alpn = tls.alpn.join(',')
+      if (tls.insecure) params.allowInsecure = '1'
+      if (tls.utls && tls.utls.fingerprint) params.fp = tls.utls.fingerprint
+    }
+  }
+  if (tr.type === 'ws') {
+    params.type = 'ws'
+    if (tr.path) params.path = tr.path
+    if (tr.headers && tr.headers.Host) params.host = tr.headers.Host
+  } else if (tr.type === 'grpc') {
+    params.type = 'grpc'
+    if (tr.service_name) params.serviceName = tr.service_name
+  } else if (tr.type === 'tcp') {
+    params.type = 'tcp'
+  }
+  const qs = (extra) => {
+    const all = Object.assign({}, params, extra || {})
+    const s = Object.keys(all)
+      .filter((k) => all[k] !== '' && all[k] != null)
+      .map((k) => `${k}=${encodeURIComponent(all[k])}`)
+      .join('&')
+    return s ? '?' + s : ''
+  }
+  const ipv6 = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+  switch (node.type) {
+    case 'vless':
+      return `vless://${node.uuid || ''}@${ipv6}:${port}${qs(node.flow ? { flow: node.flow } : {})}${frag}`
+    case 'trojan':
+      return `trojan://${encodeURIComponent(node.password || '')}@${ipv6}:${port}${qs()}${frag}`
+    case 'hysteria2': {
+      const hp = {}
+      if (node.tls && node.tls.server_name) hp.sni = node.tls.server_name
+      if (node.tls && node.tls.insecure) hp.insecure = '1'
+      if (node.obfs && node.obfs.type) {
+        hp.obfs = node.obfs.type
+        if (node.obfs.password) hp['obfs-password'] = node.obfs.password
+      }
+      return `hysteria2://${encodeURIComponent(node.password || '')}@${ipv6}:${port}${qs(hp)}${frag}`
+    }
+    case 'ss': {
+      const userinfo = b64encode(`${node.method || ''}:${node.password || ''}`)
+      let u = `ss://${userinfo}@${ipv6}:${port}`
+      if (node.plugin && node.plugin_opts) {
+        try {
+          const o = JSON.parse(node.plugin_opts)
+          const parts = [`obfs=${o.mode || 'http'}`]
+          if (o.host) parts.push(`obfs-host=${o.host}`)
+          const sep = u.includes('?') ? '&' : '?'
+          u += `${sep}plugin=${encodeURIComponent(node.plugin + ';' + parts.join(';'))}`
+        } catch (e) { /* 忽略畸形 plugin_opts */ }
+      }
+      return u + frag
+    }
+    case 'vmess': {
+      const json = {
+        v: '2', ps: linkName || '', add: node.server || '', port: node.server_port || 0,
+        id: node.uuid || '', aid: node.alter_id || 0,
+        net: (node.transport && node.transport.type) || 'tcp',
+        type: node.security || 'auto',
+        host: (node.transport && node.transport.headers && node.transport.headers.Host) || '',
+        path: (node.transport && (node.transport.path || node.transport.service_name)) || '',
+        tls: (node.tls && node.tls.enabled) ? 'tls' : '',
+        sni: (node.tls && node.tls.server_name) || '',
+      }
+      // vmess 名称在 JSON.ps 里，链接本体不追加 #fragment（非标准且破坏 base64 解析）
+      return `vmess://${b64encode(JSON.stringify(json))}`
+    }
+    default:
+      return node.raw || ''
+  }
+}
+
 module.exports = {
   parseShareLink,
   extractShareLinks,
@@ -464,6 +582,7 @@ module.exports = {
   parseClashSubscription,
   parseSubscription,
   dedupeNodes,
+  nodeToShareLink,
   // 内部函数导出供单测
-  _internal: { parseUri, tlsFields, transportFields, clashProxyToNode },
+  _internal: { parseUri, tlsFields, transportFields, clashProxyToNode, b64encode, nodeToShareLink },
 }

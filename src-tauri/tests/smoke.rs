@@ -130,38 +130,54 @@ fn configbuilder_preserves_reality_strings() {
 }
 
 #[test]
-fn data_dir_fallback_when_appdata_unwritable() {
-    // 受限会话（DSH 无头）下 %APPDATA%\yunting 目录存在但拒写（os error 5）
-    // → 解析应回退 exe 旁 data/，否则所有保存静默失败（用户报导入红框）
-    //
-    // 纯函数验证: 把 APPDATA 模拟成不可用路径，确保 resolve_data_dir_with 回退到 exe 旁。
+fn data_dir_prefers_exe_side_and_falls_back_to_appdata() {
+    // 语义（便携化收束后）: exe 旁 data/ 是主位置，%APPDATA%\yunting 仅作不可写时兜底。
+    // 1) 主路径: 即使 APPDATA 完全可用，也必须解析到 exe 旁 data/（AppData 零产生）
+    // 2) 兜底路径: exe 旁不可写时，才允许落到 %APPDATA%\yunting
+    let exe_dir = paths::exe_dir();
+
+    // 1) APPDATA 指向一个正常可写的临时目录 → 仍应选 exe 旁
+    let good = smoke_tmp_dir("appdata-good");
+    let _ = std::fs::remove_dir_all(&good);
+    std::fs::create_dir_all(&good).unwrap();
+    let d = paths::resolve_data_dir_with(
+        Some(String::new()),
+        Some(good.to_string_lossy().to_string()),
+        &exe_dir,
+    );
+    assert_eq!(
+        d,
+        exe_dir.join("data"),
+        "exe-side data/ must win over a usable APPDATA (portable lockdown)"
+    );
+    let unusable = good.join("yunting");
+    assert!(!unusable.exists(), "must not create anything under APPDATA");
+
+    // 2) 受限会话回归: 把 APPDATA 模拟成不可用路径（yunting 是文件），
+    //    exe 旁可写 → 依旧解析 exe 旁，且绝不落到坏 APPDATA
     let bogus = smoke_tmp_dir("appdata-bogus");
     let _ = std::fs::remove_dir_all(&bogus);
     std::fs::create_dir_all(&bogus).unwrap();
-    // yunting 是个文件 → create_dir_all 失败 → 必须回退
     std::fs::write(bogus.join("yunting"), b"file not dir").unwrap();
-
-    // 调用纯逻辑版本，显式注入不可用的 APPDATA
-    let exe_dir = paths::exe_dir();
-    let d = paths::resolve_data_dir_with(
+    let d2 = paths::resolve_data_dir_with(
         Some(String::new()),
         Some(bogus.to_string_lossy().to_string()),
         &exe_dir,
     );
-    let unusable = bogus.join("yunting");
     assert_ne!(
-        d, unusable,
+        d2, unusable,
         "must never resolve to the unusable APPDATA\\yunting"
     );
-    let probe = d.join(".wprobe");
+    let probe = d2.join(".wprobe");
     assert!(
         std::fs::write(&probe, b"x").is_ok(),
         "resolved data dir must be writable: {}",
-        d.display()
+        d2.display()
     );
     let _ = std::fs::remove_file(&probe);
+    let _ = std::fs::remove_dir_all(&good);
     let _ = std::fs::remove_dir_all(&bogus);
-    println!("[t] data_dir fallback ✅ → {}", d.display());
+    println!("[t] data_dir exe-side-first ✅ → {}", d2.display());
 }
 
 #[test]

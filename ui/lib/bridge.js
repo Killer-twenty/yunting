@@ -38,6 +38,9 @@
       return invoke('nodes_add', { nodes: parsed })
     },
     removeNode: async (tag) => { await invoke('nodes_remove', { tag }); return },
+    // 撤销删除：把原节点对象写回（raw 未变，去重会命中同一节点）
+    addNode: (node) => invoke('nodes_add', { nodes: [node] }),
+    renameNode: (oldTag, newTag) => invoke('nodes_rename', { tag: oldTag, newTag }),
     getSubs: () => invoke('subs_get'),
     addSub: async (url, name) => {
       // 拉文本（Rust）→ 前端解析（parsers 原逻辑）→ 节点回传 Rust
@@ -59,7 +62,10 @@
 
     // ---------- 连接 ----------
     connect: (profile) => invoke('core_connect', { selectedTag: (profile && profile.selectedTag) || null }),
+    // 仅撤销系统代理，内核保持运行（内核生命周期跟随软件）
     disconnect: () => invoke('core_disconnect'),
+    // 节点变更后重载内核配置
+    restart: (profile) => invoke('core_restart', { selectedTag: (profile && profile.selectedTag) || null }),
     getState: () => invoke('core_state'),
     testDelay: (tag) => invoke('core_delay', { tag }),
 
@@ -72,6 +78,9 @@
     saveSettings: (s) => invoke('settings_save', { s }),
     onLog: (cb) => listen('log', (e) => cb(e.payload)),
     onState: (cb) => listen('state', (e) => cb(e.payload)),
+
+    // ---------- 节点详情（纯函数，前端本地执行） ----------
+    nodeToLink: (node) => parsers.nodeToShareLink(node),
   }
 
   window.yunting = bridge

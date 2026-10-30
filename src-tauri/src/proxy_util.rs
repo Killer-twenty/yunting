@@ -1,7 +1,12 @@
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const INTERNET_SETTINGS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+
+/// 本应用是否刚成功开/关过系统代理（区分"我们设的"与"其他程序设的"）
+static ENABLED_BY_US: AtomicBool = AtomicBool::new(false);
+
 const DEFAULT_BYPASS_LIST: &str =
     "localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;\
 172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*";
@@ -16,11 +21,24 @@ pub struct ProxyStatus {
 }
 
 pub fn enable(server: &str) -> Result<(), String> {
-    set_system_proxy(true, server, DEFAULT_BYPASS_LIST)
+    let r = set_system_proxy(true, server, DEFAULT_BYPASS_LIST);
+    if r.is_ok() {
+        ENABLED_BY_US.store(true, Ordering::SeqCst);
+    }
+    r
 }
 
 pub fn disable() -> Result<(), String> {
-    set_system_proxy(false, "", DEFAULT_BYPASS_LIST)
+    let r = set_system_proxy(false, "", DEFAULT_BYPASS_LIST);
+    if r.is_ok() {
+        ENABLED_BY_US.store(false, Ordering::SeqCst);
+    }
+    r
+}
+
+/// 当前系统代理是否由本应用开启（退出清理只撤销自己写的注册表项）
+pub fn enabled_by_us() -> bool {
+    ENABLED_BY_US.load(Ordering::SeqCst)
 }
 
 #[cfg(windows)]
@@ -302,12 +320,27 @@ pub fn status_json() -> Value {
         "host": status.host,
         "port": status.port,
         "server": status.server,
-        "override": status.override_list
+        "override": status.override_list,
+        "ours": status.enable && ENABLED_BY_US.load(Ordering::SeqCst)
     })
 }
 
+#[cfg(windows)]
 pub fn cleanup_stale(port: u16) -> bool {
     let expected = format!("127.0.0.1:{port}");
     let status = status();
-    status.enable && status.server.eq_ignore_ascii_case(&expected) && disable().is_ok()
+    if status.enable && status.server.eq_ignore_ascii_case(&expected) {
+        // 服务器端口与我们的一致 → 大概率是上次本应用异常退出残留，静默恢复
+        let disabled = disable().is_ok();
+        if disabled {
+            ENABLED_BY_US.store(false, Ordering::SeqCst);
+        }
+        return disabled;
+    }
+    false
+}
+
+#[cfg(not(windows))]
+pub fn cleanup_stale(_port: u16) -> bool {
+    false
 }

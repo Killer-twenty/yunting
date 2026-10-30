@@ -4,6 +4,7 @@
   "description": "yunting 主窗口权限：core 默认命令 + shell 事件监听",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:webview:deny-internal-toggle-devtools"
   ]
 }

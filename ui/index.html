@@ -6,145 +6,421 @@
   <title>yunting</title>
   <style>
     :root {
+      color-scheme: light;
+      /* ============================================================
+       * 配色令牌 —— 默认 CFW 亮色（Clash for Windows 亮色方案）
+       * 纯白内容区 / 浅灰侧栏 / 选中项白色方块 / 近黑文字 / 红色开关 / 藏青链接
+       * 结构参照 sing-box-windows 的分层令牌（primitive → semantic → size）
+       * ============================================================ */
+      /* 原始色板 */
+      --gray-50: #fbfbfd;  --gray-100: #f5f7fa; --gray-150: #f2f3f5;
+      --gray-200: #ebeef5; --gray-300: #e4e7ed; --gray-400: #dcdfe6;
+      --gray-500: #c0c4cc; --gray-600: #909399; --gray-700: #606266;
+      --gray-900: #303133; --gray-950: #1d1e1f;
+      --navy: #324158;     /* CFW 链接 / Logo 藏青 */
+      --cfw-red: #f56c6c;  /* CFW 开关旋钮 / 计时冒号 */
+      --cfw-green: #42b983; --cfw-amber: #ff9900;
+
+      /* 语义 Token（变量名保持兼容，renderer.js 内联样式引用 --bg3/--border/--fg-dim/--err） */
+      --bg: #ffffff;             /* 内容区主背景（纯白） */
+      --bg2: #f2f3f5;            /* 侧栏 / 页头（浅灰） */
+      --bg3: #f5f7fa;            /* 控件底 / 次级填充 */
+      --bg4: #ebeef5;            /* hover */
+      --card-bg: #ffffff;        /* 卡片：白底 + 细边框 */
+      --fg: var(--gray-900);     /* 主文本 近黑 */
+      --fg-dim: var(--gray-600); /* 次级文本 中灰 */
+      --accent: var(--navy);     /* 主交互色（按钮/选中文字）= CFW 藏青 */
+      --accent-hot: var(--cfw-red);  /* CFW 标志红：开关 / 状态强调 */
+      --accent-soft: rgba(50, 65, 88, 0.06);
+      --accent-softer: rgba(50, 65, 88, 0.12);
+      --ok: var(--cfw-green); --warn: var(--cfw-amber); --err: var(--cfw-red);
+      --border: var(--gray-300);
+      --border-strong: var(--gray-400);
+      --divider: var(--gray-200);
+      --nav-active-bg: #ffffff;  /* CFW 选中项 = 白色方块（与内容区相连） */
+      --shadow-xs: 0 1px 2px rgba(48, 49, 51, 0.04);
+      --shadow-sm: 0 2px 8px rgba(48, 49, 51, 0.06);
+      --shadow-md: 0 6px 20px rgba(48, 49, 51, 0.09);
+      --radius-sm: 4px; --radius-md: 8px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, Arial, sans-serif;
+      --font-mono: "Fira Code", "JetBrains Mono", ui-monospace, Consolas, "Cascadia Mono", Menlo, monospace;
+    }
+    /* ---------- 暗色主题（设置里可切换） ---------- */
+    :root[data-theme="dark"] {
       color-scheme: dark;
-      --bg: #14161a; --bg2: #1b1e24; --bg3: #23272f;
-      --fg: #e6e6e6; --fg-dim: #8b93a1;
-      --accent: #4da3ff; --ok: #3fb950; --warn: #d29922; --err: #f85149;
-      --border: #2d323c;
+      --bg: #17181c;
+      --bg2: #1f2127;
+      --bg3: #262931;
+      --bg4: #2f333d;
+      --card-bg: #1f2127;
+      --fg: #e6e8ee;
+      --fg-dim: #8b93a3;
+      --accent: #6ea8fe;
+      --accent-hot: #f56c6c;
+      --accent-soft: rgba(110, 168, 254, 0.12);
+      --accent-softer: rgba(110, 168, 254, 0.22);
+      --ok: #3fd08a; --warn: #e5a50a; --err: #f56c6c;
+      --border: #2e323b;
+      --border-strong: #3a3f4a;
+      --divider: #2a2e36;
+      --nav-active-bg: #262931;
+      --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.34);
+      --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.42);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      font-family: var(--font-sans);
       background: var(--bg); color: var(--fg);
       display: flex; overflow: hidden; font-size: 13px; user-select: none;
+      transition: background .2s, color .2s;
     }
-    /* ============ 左侧导航 ============ */
+    ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--gray-500); border-radius: 4px; }
+    :root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #454b57; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--gray-600); }
+    ::-webkit-scrollbar-corner { background: transparent; }
+    /* ============ 左侧导航（CFW: 浅灰侧栏 + 白色选中块） ============ */
     aside.nav {
-      width: 168px; background: var(--bg2); border-right: 1px solid var(--border);
+      width: 188px; background: var(--bg2); border-right: 1px solid var(--divider);
       display: flex; flex-direction: column; padding-top: 0; flex-shrink: 0;
     }
     .nav-logo {
-      padding: 18px 16px 14px; font-size: 17px; font-weight: 700; color: var(--accent);
-      border-bottom: 1px solid var(--border); letter-spacing: 1px;
+      padding: 18px 16px 14px; font-size: 16px; font-weight: 700; color: var(--accent);
+      letter-spacing: 2px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .nav-logo .dot {
+      width: 10px; height: 10px; border-radius: 2px;
+      background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
     }
     .nav-items { padding: 10px 8px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+    /* 导航项：整组（图标+文字+徽标）水平居中 */
     .nav-item {
-      display: flex; align-items: center; gap: 10px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
       padding: 9px 12px; border-radius: 8px; cursor: pointer;
-      color: var(--fg-dim); font-size: 13px; border: 1px solid transparent;
+      color: var(--fg-dim); font-size: 13px; border: 1px solid transparent; position: relative;
+      transition: background .15s, color .15s, border-color .15s;
     }
-    .nav-item:hover { color: var(--fg); background: var(--bg3); }
-    .nav-item.active { background: var(--bg3); color: var(--accent); font-weight: 600; border-color: var(--border); }
-    .nav-item .icon { font-size: 15px; width: 18px; text-align: center; }
-    .nav-item .badge { margin-left: auto; font-size: 11px; color: var(--fg-dim); }
-    /* 底部连接状态 */
-    .nav-footer { padding: 12px 14px; border-top: 1px solid var(--border); }
-    .status-pill {
-      display: flex; align-items: center; gap: 7px; padding: 6px 10px;
-      background: var(--bg3); border-radius: 8px; font-size: 12px; color: var(--fg-dim);
+    .nav-item:hover { color: var(--fg); background: var(--bg4); }
+    .nav-item.active {
+      background: var(--nav-active-bg); color: var(--accent); font-weight: 600;
+      border-color: var(--border); box-shadow: var(--shadow-xs);
     }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
-    .status-dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+    .nav-item .icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+    /* 标签统一拉伸到 5 字宽：四字/五字同宽不错行，"设置"两字左右边缘对齐 */
+    .nav-text { display: inline-block; width: 5em; white-space: nowrap; text-align: justify; text-align-last: justify; }
+    .nav-item .badge { font-size: 11px; color: var(--fg-dim); }
+    /* 底部连接状态（CFW: 计时 + 核心已运行）——整体居中 */
+    .nav-footer { padding: 12px 14px; border-top: 1px solid var(--divider); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .nav-timer { font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums; letter-spacing: 1px; }
+    .nav-timer .colon { color: var(--accent-hot); margin: 0 1px; }
+    .status-line { display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 12px; color: var(--fg-dim); }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-500); flex-shrink: 0; }
+    :root[data-theme="dark"] .status-dot { background: #4a5060; }
+    .status-dot.on { background: var(--ok); box-shadow: 0 0 6px rgba(66, 185, 131, 0.55); }
     .status-dot.err { background: var(--err); }
     /* ============ 主区 ============ */
-    main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
     .page { flex: 1; display: none; flex-direction: column; min-height: 0; }
     .page.active { display: flex; }
     .page-header {
-      display: flex; align-items: center; gap: 12px;
-      padding: 12px 18px; border-bottom: 1px solid var(--border); background: var(--bg2);
+      display: flex; align-items: center; gap: 12px; flex: 0 0 56px;
+      padding: 0 20px; border-bottom: 1px solid var(--divider); background: var(--bg);
     }
-    .page-header h2 { font-size: 15px; font-weight: 600; }
+    .page-header h2 { font-size: 19px; font-weight: 700; }
     .page-header .sub { font-size: 12px; color: var(--fg-dim); }
-    .page-body { flex: 1; overflow-y: auto; padding: 14px 18px; min-height: 0; }
-    /* 通用按钮/输入 */
-    button {
-      background: var(--bg3); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+    /* ============ 加速模式折叠下拉（左栏顶部，展开时把下方导航项往下推） ============ */
+    /* 导航项可见内容组宽度 = icon 18 + gap 8 + label 5em(65px@13px) = 91px
+       箭头要贴在内容组右侧空白，需从居中基线偏移该组半宽（改字号时同步改这里） */
+    .accel-group { --nav-group-w: 91px; display: flex; flex-direction: column; gap: 2px; }
+    /* 箭头不参与布局（绝对定位贴在内容组右侧空白），图标+文字与下方条目对齐 */
+    .accel-caret {
+      position: absolute; left: calc(50% + var(--nav-group-w) / 2 + 3px); top: 50%;
+      transform: translateY(-50%);
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px;
+      font-size: 11px; line-height: 1; color: var(--fg-dim); border-radius: 4px;
+      cursor: pointer; transition: transform .25s, color .15s, background .15s;
     }
-    button:hover { border-color: var(--accent); }
+    .accel-caret:hover { color: var(--accent); background: var(--accent-soft); }
+    .nav-item.accel.open .accel-caret { color: var(--accent); transform: translateY(-50%) rotate(180deg); }
+    /* 折叠容器：max-height 过渡实现收缩展开 */
+    .accel-collapse {
+      position: relative; display: flex; flex-direction: column; gap: 2px;
+      overflow: hidden; max-height: 0; transition: max-height .28s cubic-bezier(.4, 0, .2, 1);
+    }
+    /* 滑块背景：随悬停项垂直平移 */
+    .accel-slider {
+      position: absolute; left: 0; right: 0; top: 0; height: 28px;
+      border-radius: 6px; background: var(--accent-soft);
+      transform: translateY(0); opacity: 0; pointer-events: none; z-index: 0;
+      transition: transform .18s cubic-bezier(.4, 0, .2, 1), opacity .14s;
+    }
+    /* 折叠项字体略小于外显主项（12px < 13px），做层次；未实现功能整体置灰 */
+    .accel-opt {
+      position: relative; z-index: 1;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      height: 28px; padding: 0 10px;
+      border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--fg);
+      background: transparent; white-space: nowrap;
+    }
+    .accel-opt.wip { color: var(--fg-dim); }
+    .accel-opt.wip .icon { opacity: .55; }
+    .accel-opt .icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+    .accel-opt .name { text-align: center; flex-shrink: 0; }
+    /* 选中高亮；但 wip（未实现）功能即使选中也保持灰色，只加粗 */
+    .accel-opt.current .name { color: var(--accent); font-weight: 600; }
+    .accel-opt.wip.current .name { color: var(--fg-dim); }
+    .accel-opt.wip.current { color: var(--fg-dim); }
+    .accel-group.open .accel-collapse { max-height: 92px; }
+    .page-body { flex: 1; overflow-y: auto; padding: 16px 20px; min-height: 0; }
+    /* 通用按钮/输入（CFW: 白底细边框 / 藏青实底主按钮，小圆角） */
+    button {
+      background: var(--card-bg); color: var(--fg); border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm); padding: 6px 14px; font-size: 13px; cursor: pointer; font-family: inherit;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
     button:disabled { opacity: .45; cursor: default; }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { background: #3d5273; border-color: #3d5273; color: #fff; }
     button.stop { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+    button.stop:hover { background: #e0605f; border-color: #e0605f; color: #fff; }
     input[type=text], select, textarea {
-      background: var(--bg3); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 6px; padding: 6px 10px; font-size: 13px; font-family: inherit; outline: none; width: 100%;
+      background: var(--card-bg); color: var(--fg); border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13px; font-family: inherit; outline: none; width: 100%;
+      transition: border-color .15s;
     }
-    input[type=text]:focus, textarea:focus { border-color: var(--accent); }
+    input[type=text]:focus, textarea:focus, select:focus { border-color: var(--accent); }
+    input[type=text]::placeholder, textarea::placeholder { color: var(--gray-500); }
+    select { cursor: pointer; }
     input[type=checkbox] { accent-color: var(--accent); }
+    /* ---------- CFW 风格开关（红色旋钮，截图同款） ---------- */
+    .switch { position: relative; display: inline-block; width: 40px; height: 21px; flex-shrink: 0; cursor: pointer; }
+    .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .switch .track {
+      position: absolute; inset: 0; border-radius: 999px; background: var(--gray-400);
+      transition: background .2s; box-shadow: inset 0 0 2px rgba(0,0,0,.08);
+    }
+    :root[data-theme="dark"] .switch .track { background: #3a3f4a; }
+    .switch .track::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px;
+      border-radius: 50%; background: #fff; transition: transform .2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+    }
+    /* 开启态：浅灰轨道 + 红色旋钮（CFW 标志性开关） */
+    .switch input:checked + .track { background: #fde2e2; }
+    .switch input:checked + .track::after { transform: translateX(19px); background: var(--accent-hot); }
+    .switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-soft); }
     /* ============ VPN 面板 ============ */
     .vpn-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
     .vpn-toolbar input { flex: 1; }
     .connect-bar {
-      display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px;
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+      display: flex; align-items: center; gap: 12px; padding: 14px 16px; margin-bottom: 12px;
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+      box-shadow: var(--shadow-sm);
     }
     .connect-bar .target { flex: 1; min-width: 0; }
-    .connect-bar .target .name { font-size: 14px; font-weight: 600; }
+    .connect-bar .target .name { font-size: 14px; font-weight: 700; }
     .connect-bar .target .desc { font-size: 12px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .node-list { display: flex; flex-direction: column; gap: 4px; }
+    .node-list { display: flex; flex-direction: column; gap: 6px; }
+    /* CFW 亮色节点行: 白底 + 细边框，选中 = 藏青左边条 + 淡底 */
     .node {
-      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      background: var(--bg2); border: 1px solid transparent; border-radius: 8px; cursor: pointer;
+      display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+      background: var(--card-bg); border: 1px solid var(--border); border-left: 3px solid var(--border);
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: background .15s, border-color .15s;
     }
-    .node:hover { border-color: var(--border); }
-    .node.selected { border-color: var(--accent); background: #1a2532; }
-    .node .tag { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .node .type { font-size: 11px; color: var(--fg-dim); background: var(--bg3); padding: 1px 7px; border-radius: 8px; }
+    .node:hover { border-color: var(--border-strong); border-left-color: var(--gray-500); background: var(--bg3); }
+    .node.selected { border-left-color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+    .node .tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; transform: translateY(-1.6px); }
+    /* 名称与右侧状态列之间的弹性占位（扳手紧跟名称，不被推到最右） */
+    .node .fill { flex: 1; min-width: 8px; }
+    .node .type {
+      font-size: 10px; color: var(--fg-dim); background: transparent;
+      border: 1px solid var(--border-strong); padding: 0 6px; border-radius: 3px;
+    }
+    .node.selected .type { border-color: var(--accent); color: var(--accent); }
     .node .delay { font-size: 12px; min-width: 48px; text-align: right; }
     .delay.good { color: var(--ok); } .delay.mid { color: var(--warn); } .delay.bad { color: var(--fg-dim); }
     .dl-fail { color: var(--err); font-size: 11px; }
-    .node .del { visibility: hidden; background: none; border: none; color: var(--fg-dim); padding: 0 4px; }
+    .node .del { visibility: hidden; background: none; border: none; color: var(--gray-500); padding: 0 4px; }
     .node:hover .del { visibility: visible; }
-    .node .del:hover { color: var(--err); }
+    .node .del:hover { color: var(--err); background: none; border: none; }
+    /* 节点详情扳手按钮（名称右侧） */
+    /* 节点详情按钮（眼睛图标，紧跟名称） */
+    .node .detail {
+      visibility: hidden; background: none; border: none; box-shadow: none;
+      color: var(--gray-500); padding: 0 2px; cursor: pointer;
+      display: inline-flex; align-items: center; flex-shrink: 0;
+    }
+    .node:hover .detail, .node .detail.active { visibility: visible; }
+    .node .detail:hover { color: var(--accent); background: none; border: none; }
+    /* 名称上移 1/8 字高；眼睛单独回到原位（下移 1/8 抵消） */
+    .node .detail svg { display: block; }
+    /* ============ 节点详情抽屉（右侧滑出，无遮罩：点其它眼睛可直接切换） ============ */
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: 380px; max-width: 92vw; z-index: 301;
+      background: var(--card-bg); border-left: 1px solid var(--border-strong);
+      box-shadow: -8px 0 28px rgba(0, 0, 0, .18);
+      transform: translateX(100%); transition: transform .26s cubic-bezier(.4, 0, .2, 1);
+      display: flex; flex-direction: column;
+    }
+    .drawer.show { transform: translateX(0); }
+    /* 切换节点时内容淡入滑动（不关抽屉的动效） */
+    .drawer-body.swap { animation: drawer-swap .22s cubic-bezier(.4, 0, .2, 1); }
+    @keyframes drawer-swap {
+      from { opacity: 0; transform: translateX(14px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .drawer-head {
+      display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+      border-bottom: 1px solid var(--divider); flex-shrink: 0;
+    }
+    .drawer-head .title { font-size: 15px; font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drawer-close { background: none; border: none; box-shadow: none; color: var(--fg-dim); font-size: 16px; padding: 2px 8px; cursor: pointer; }
+    .drawer-close:hover { color: var(--err); background: none; border: none; }
+    .drawer-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+    .drawer-section { margin-bottom: 16px; }
+    .drawer-section .sec-title { font-size: 11px; color: var(--fg-dim); font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .kv-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; }
+    .kv-grid .k { color: var(--fg-dim); }
+    .kv-grid .v { color: var(--fg); word-break: break-all; font-variant-numeric: tabular-nums; }
+    /* 显示名称编辑行 */
+    .rename-row { display: flex; gap: 8px; align-items: center; }
+    .rename-row input { flex: 1; }
+    .rename-row button { flex-shrink: 0; }
+    /* 抽屉脚部：靠左红色删除 */
+    .drawer-foot {
+      flex-shrink: 0; display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px; border-top: 1px solid var(--divider);
+    }
+    .btn-danger {
+      background: transparent; color: var(--err); border: 1px solid var(--err);
+      border-radius: var(--radius-sm); padding: 6px 14px; font-size: 13px; cursor: pointer;
+      font-family: inherit; box-shadow: none; transition: background .15s, color .15s;
+    }
+    .btn-danger:hover { background: var(--err); color: #fff; }
+    /* 分享链接区块：悬浮显示复制图标 */
+    .link-box {
+      position: relative; background: var(--bg3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 40px 10px 12px;
+      font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+      word-break: break-all; color: var(--fg-dim); max-height: 180px; overflow-y: auto;
+    }
+    .link-box .copy-btn {
+      position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; padding: 0;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      background: var(--card-bg); border: 1px solid var(--border-strong); border-radius: 6px;
+      color: var(--fg-dim); cursor: pointer; box-shadow: var(--shadow-xs);
+      opacity: 0; transition: opacity .15s, color .2s, border-color .2s, background .2s;
+    }
+    .link-box:hover .copy-btn, .link-box .copy-btn.busy, .link-box .copy-btn.done { opacity: 1; }
+    .link-box .copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .link-box .copy-btn svg { display: block; }
+    .link-box .copy-btn .ic-copy { transition: opacity .12s; }
+    /* 漩涡特效层：圆环旋转描边 → 对勾描线 */
+    .link-box .copy-btn .fx { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0; }
+    .link-box .copy-btn .fx svg { width: 18px; height: 18px; }
+    .link-box .copy-btn .fx .ring { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 50; stroke-dashoffset: 50; }
+    .link-box .copy-btn .fx .chk { fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; stroke-dashoffset: 24; }
+    /* busy：小漩涡旋转 + 圆环描边 */
+    .link-box .copy-btn.busy .ic-copy { opacity: 0; }
+    .link-box .copy-btn.busy .fx { opacity: 1; }
+    .link-box .copy-btn.busy .fx svg { animation: copy-vortex .5s cubic-bezier(.45,0,.35,1); }
+    .link-box .copy-btn.busy .fx .ring { animation: ring-draw .5s cubic-bezier(.45,0,.35,1) forwards; }
+    /* done：绿底，圆环补满，对勾描线（从漩涡变成对勾） */
+    .link-box .copy-btn.done { color: #fff; background: var(--ok); border-color: var(--ok); }
+    .link-box .copy-btn.done .ic-copy { opacity: 0; }
+    .link-box .copy-btn.done .fx { opacity: 1; }
+    .link-box .copy-btn.done .fx .ring { stroke-dashoffset: 0; }
+    .link-box .copy-btn.done .fx .chk { animation: chk-draw .32s .04s ease forwards; }
+    @keyframes copy-vortex { from { transform: rotate(0) scale(.85); } to { transform: rotate(360deg) scale(1); } }
+    @keyframes ring-draw { from { stroke-dashoffset: 50; } to { stroke-dashoffset: 0; } }
+    @keyframes chk-draw { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
     .empty { color: var(--fg-dim); text-align: center; padding: 40px 20px; }
     /* ============ 订阅面板 ============ */
     .sub-row {
-      display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 6px;
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+      display: flex; align-items: center; gap: 8px; padding: 11px 14px; margin-bottom: 6px;
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: var(--shadow-xs);
     }
     .sub-row .name { flex: 1; min-width: 0; }
-    .sub-row .name .t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sub-row .name .t { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sub-row .name .u { font-size: 11px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sub-row .meta { font-size: 11px; color: var(--fg-dim); text-align: right; }
     .sub-row button { padding: 3px 10px; font-size: 12px; }
     /* ============ 设置面板 ============ */
     .settings-card {
-      background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
-      padding: 14px 16px; margin-bottom: 12px;
+      background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm);
     }
-    .settings-card h3 { font-size: 12px; color: var(--fg-dim); font-weight: 600; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
-    .settings-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-    .settings-row label { width: 88px; color: var(--fg-dim); flex-shrink: 0; }
+    .settings-card h3 { font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+    /* 三列网格：标签 / 控件列 / 说明列 —— 右列整体对齐到说明文本左边缘 */
+    .settings-row { display: grid; grid-template-columns: 88px 232px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .settings-row > label { width: auto; color: var(--fg-dim); flex-shrink: 0; }
+    .settings-row > .cell { grid-column: 2; display: flex; align-items: center; gap: 10px; }
+    .settings-row > .hint { grid-column: 3; }
     .settings-row input[type=text], .settings-row select { width: 130px; }
     .settings-row .hint { font-size: 11px; color: var(--fg-dim); }
     /* ============ 日志面板 ============ */
-    .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 160px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
-    .log-wrap h3 { font-size: 12px; color: var(--fg-dim); font-weight: 600; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+    .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 160px; position: relative; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: var(--shadow-sm); }
+    .log-wrap h3 { font-size: 12px; color: var(--fg-dim); font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
     #logBox {
-      flex: 1; overflow-y: auto; font-family: Consolas, monospace; font-size: 11.5px;
-      background: var(--bg); border-radius: 6px; padding: 8px; line-height: 1.55;
-      user-select: text; white-space: pre-wrap; word-break: break-all; color: var(--fg-dim);
+      flex: 1; min-height: 0; overflow-y: auto; font-family: var(--font-mono); font-size: 11.5px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; line-height: 1.55;
+      user-select: text; white-space: pre-wrap; word-break: break-all; color: var(--gray-700);
     }
+    :root[data-theme="dark"] #logBox { background: var(--bg); color: #a8b0be; }
     /* ============ 弹窗/Toast ============ */
+    /* 默认 dialog 会被 UA 样式放到左上，显式居中 */
     dialog {
-      background: var(--bg2); color: var(--fg); border: 1px solid var(--border);
-      border-radius: 10px; padding: 18px; width: 460px; max-width: 90vw;
+      background: var(--card-bg); color: var(--fg); border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md); padding: 18px; width: 460px; max-width: 90vw;
+      box-shadow: var(--shadow-md);
+      position: fixed; inset: 0; margin: auto;
+      height: fit-content; max-height: 86vh;
     }
-    dialog::backdrop { background: rgba(0,0,0,.55); }
-    dialog h3 { margin-bottom: 10px; font-size: 14px; }
-    dialog textarea { height: 130px; resize: vertical; font-family: Consolas, monospace; font-size: 12px; }
+    dialog::backdrop { background: rgba(15, 23, 42, .35); }
+    dialog h3 { margin-bottom: 10px; font-size: 15px; }
+    dialog textarea { height: 130px; resize: vertical; font-family: var(--font-mono); font-size: 12px; }
     dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
     .toast {
       position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%);
-      background: var(--bg3); border: 1px solid var(--border); color: var(--fg);
-      border-radius: 8px; padding: 8px 18px; font-size: 13px;
-      box-shadow: 0 4px 18px rgba(0,0,0,.4); opacity: 0; transition: opacity .25s; pointer-events: none;
-      max-width: 80vw; z-index: 99;
+      background: var(--card-bg); border: 1px solid var(--border-strong); color: var(--fg);
+      border-radius: var(--radius-md); padding: 9px 18px; font-size: 13px;
+      box-shadow: var(--shadow-md); opacity: 0; transition: opacity .25s; pointer-events: none;
+      max-width: 80vw; z-index: 400;
     }
     .toast.show { opacity: 1; }
-    .toast.err { border-color: var(--err); }
+    .toast.err { border-color: var(--err); color: var(--err); }
+    /* ============ 撤销条（删除/清空后 5 秒内可复原） ============ */
+    .undo-bar {
+      position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%) translateY(12px);
+      display: flex; align-items: center; gap: 14px;
+      background: var(--gray-900); color: #fff;
+      border-radius: var(--radius-md); padding: 8px 10px 8px 18px; font-size: 13px;
+      box-shadow: var(--shadow-lg); opacity: 0; pointer-events: none; z-index: 420;
+      transition: opacity .22s, transform .22s;
+      max-width: 86vw;
+    }
+    .undo-bar.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+    :root[data-theme="dark"] .undo-bar { background: #000; border: 1px solid var(--border-strong); }
+    .undo-bar .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .undo-bar .undo-btn {
+      background: none; border: none; box-shadow: none; color: var(--accent);
+      font-weight: 700; font-size: 13px; padding: 4px 10px; cursor: pointer; flex-shrink: 0;
+      font-family: inherit;
+    }
+    .undo-bar .undo-btn:hover { background: rgba(255, 255, 255, .1); border: none; color: #fff; }
+    /* 5 秒倒计时进度条 */
+    .undo-bar .bar {
+      position: absolute; left: 0; bottom: 0; height: 2px; background: var(--accent);
+      border-radius: 0 0 var(--radius-md) var(--radius-md); width: 100%;
+    }
+    .undo-bar.show .bar { animation: undo-timer 5s linear forwards; }
+    @keyframes undo-timer { from { width: 100%; } to { width: 0%; } }
     /* 占位页 */
     .placeholder-hero { text-align: center; padding-top: 100px; }
     .placeholder-hero .big { font-size: 40px; margin-bottom: 14px; }
@@ -155,17 +431,16 @@
 <body>
   <!-- ============ 左侧导航 ============ -->
   <aside class="nav">
-    <div class="nav-logo">云 亭</div>
-    <div class="nav-items">
-      <div class="nav-item active" data-page="vpn"><span class="icon">🛡️</span>VPN 加速</div>
-      <div class="nav-item" data-page="subs"><span class="icon">📡</span>订阅管理<span class="badge" id="navSubCount"></span></div>
-      <div class="nav-item" data-page="logs"><span class="icon">📜</span>运行日志</div>
-      <div class="nav-item" data-page="settings"><span class="icon">⚙️</span>设置</div>
-      <div class="nav-item" data-page="game"><span class="icon">🎮</span>游戏加速<span class="badge">开发中</span></div>
-      <div class="nav-item" data-page="online"><span class="icon">🌐</span>联机加速<span class="badge">开发中</span></div>
+    <div class="nav-logo"><span class="dot"></span>云 亭</div>
+    <div class="nav-items" id="navItems">
+      <!-- 顶部加速模式下拉由 renderer.js 插入（.nav-item.accel） -->
+      <div class="nav-item" data-page="subs"><span class="icon">📡</span><span class="nav-text">订阅管理</span><span class="badge" id="navSubCount"></span></div>
+      <div class="nav-item" data-page="logs"><span class="icon">📜</span><span class="nav-text">运行日志</span></div>
+      <div class="nav-item" data-page="settings"><span class="icon">⚙️</span><span class="nav-text">设置</span></div>
     </div>
     <div class="nav-footer">
-      <div class="status-pill">
+      <div class="nav-timer" id="connTimer">--<span class="colon">:</span>--<span class="colon">:</span>--</div>
+      <div class="status-line">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">未连接</span>
       </div>
@@ -177,7 +452,6 @@
     <!-- VPN 面板（默认） -->
     <section class="page active" id="page-vpn">
       <div class="page-header">
-        <h2>VPN 加速</h2>
         <span class="sub">国内直连，国外走代理</span>
         <span style="flex:1"></span>
         <span id="vpnNodeCount" class="sub"></span>
@@ -195,11 +469,11 @@
           <button id="btnImport">导入节点</button>
           <button id="btnTestAll">测全部延迟</button>
           <span style="flex:1"></span>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg-dim)">
-            <input type="checkbox" id="chkAutoProxy" /> 连接时自动开系统代理
-          </label>
-        </div>
-        <div class="node-list" id="nodeList">
+          <span style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-dim)">
+            连接时自动开系统代理
+            <label class="switch"><input type="checkbox" id="chkAutoProxy" /><span class="track"></span></label>
+          </span>
+        </div>        <div class="node-list" id="nodeList">
           <div class="empty">暂无节点 —— 点「导入节点」粘贴分享链接，或到「订阅管理」添加订阅</div>
         </div>
       </div>
@@ -208,7 +482,6 @@
     <!-- 订阅面板 -->
     <section class="page" id="page-subs">
       <div class="page-header">
-        <h2>订阅管理</h2>
         <span class="sub">拉取订阅后节点自动进入 VPN 面板</span>
       </div>
       <div class="page-body">
@@ -224,7 +497,6 @@
     <!-- 日志面板 -->
     <section class="page" id="page-logs">
       <div class="page-header">
-        <h2>运行日志</h2>
         <span class="sub">内核输出 / 操作记录</span>
         <span style="flex:1"></span>
         <button id="btnClearLog">清空</button>
@@ -240,49 +512,71 @@
     <!-- 设置面板 -->
     <section class="page" id="page-settings">
       <div class="page-header"><h2>设置</h2></div>
-      <div class="page-body" style="max-width:640px">
+      <div class="page-body">
         <div class="settings-card">
           <h3>分流模式</h3>
           <div class="settings-row">
             <label>模式</label>
-            <select id="setRouteMode" style="width:160px">
-              <option value="rule">规则（国内直连）</option>
-              <option value="global">全局代理</option>
-            </select>
+            <span class="cell">
+              <select id="setRouteMode" style="width:160px">
+                <option value="rule">规则（国内直连）</option>
+                <option value="global">全局代理</option>
+              </select>
+            </span>
             <span class="hint" id="routeModeHint"></span>
           </div>
           <div id="directListPanel">
             <div class="settings-row">
               <label>直连白名单</label>
-              <input type="text" id="directAddInput" placeholder="域名，如 openai.com" style="width:160px" />
-              <button id="btnDirectAdd">加入</button>
+              <span class="cell">
+                <input type="text" id="directAddInput" placeholder="域名，如 openai.com" style="width:160px" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other" />
+                <button id="btnDirectAdd">加入</button>
+              </span>
               <span class="hint">规则模式下优先级最高</span>
             </div>
             <div id="directList" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 6px 98px"></div>
+            <div class="settings-row" id="directClearRow" style="display:none">
+              <label></label>
+              <span class="cell"><button id="btnDirectClear" class="btn-danger">一键清空</button></span>
+              <span class="hint">清空全部自定义直连域名（可撤销）</span>
+            </div>
           </div>
         </div>
         <div class="settings-card">
           <h3>端口</h3>
           <div class="settings-row">
             <label>本地端口</label>
-            <input type="text" id="setPort" />
+            <span class="cell"><input type="text" id="setPort" /></span>
             <span class="hint">mixed 入站（默认 7890）</span>
           </div>
           <div class="settings-row">
             <label>API 端口</label>
-            <input type="text" id="setApiPort" />
+            <span class="cell"><input type="text" id="setApiPort" /></span>
             <span class="hint">clash api（默认 9090）</span>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>外观</h3>
+          <div class="settings-row">
+            <label>配色方案</label>
+            <span class="cell">
+              <select id="setTheme" style="width:190px">
+                <option value="light">浅色 · Clash for Windows</option>
+                <option value="dark">深色</option>
+                <option value="system">跟随系统</option>
+              </select>
+            </span>
+            <span class="hint">即时生效，无需重启</span>
           </div>
         </div>
         <div class="settings-card">
           <h3>系统代理</h3>
           <div class="settings-row">
             <label>当前状态</label>
-            <span class="hint" id="proxyStateText">检测中…</span>
-          </div>
-          <div class="settings-row">
-            <button id="btnSysProxy">开系统代理</button>
-            <span class="hint">手动开关（不用内核也行）</span>
+            <span class="cell">
+              <label class="switch"><input type="checkbox" id="chkSysProxy" /><span class="track"></span></label>
+            </span>
+            <span class="hint" id="proxyStateText"></span>
           </div>
         </div>
       </div>
@@ -290,23 +584,23 @@
 
     <!-- 游戏加速（占位） -->
     <section class="page" id="page-game">
-      <div class="page-header"><h2>游戏加速</h2><span class="sub">开发中</span></div>
+      <div class="page-header"><span class="sub">TUN 虚拟网卡 + 进程分流，为指定游戏流量走加速通道</span></div>
       <div class="page-body">
         <div class="placeholder-hero">
           <div class="big">🎮</div>
-          <div class="t">游戏加速 · 开发中</div>
-          <div class="d">TUN 虚拟网卡 + 进程分流，为指定游戏流量走加速通道（MC / Terraria / 星露谷联机等）</div>
+          <div class="t">TUN 虚拟网卡 + 进程分流</div>
+          <div class="d">为指定游戏流量走加速通道（MC / Terraria / 星露谷联机等）</div>
         </div>
       </div>
     </section>
 
     <!-- 联机加速（占位） -->
     <section class="page" id="page-online">
-      <div class="page-header"><h2>联机加速</h2><span class="sub">开发中</span></div>
+      <div class="page-header"><span class="sub">基于游戏加速的联机房间优化，降低组网延迟</span></div>
       <div class="page-body">
         <div class="placeholder-hero">
           <div class="big">🌐</div>
-          <div class="t">联机加速 · 开发中</div>
+          <div class="t">联机房间优化</div>
           <div class="d">基于游戏加速的联机房间优化，降低组网延迟</div>
         </div>
       </div>
@@ -325,6 +619,23 @@
   </dialog>
 
   <div class="toast" id="toast"></div>
+
+  <!-- 撤销条（删除/清空后 5 秒内可复原） -->
+  <div class="undo-bar" id="undoBar">
+    <span class="msg" id="undoMsg"></span>
+    <button class="undo-btn" id="undoBtn">撤销</button>
+    <span class="bar"></span>
+  </div>
+
+  <!-- 节点详情抽屉 -->
+  <aside class="drawer" id="nodeDrawer">
+    <div class="drawer-head">
+      <span class="title" id="drawerTitle">节点详情</span>
+      <button class="drawer-close" id="drawerClose" title="关闭">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-foot" id="drawerFoot"></div>
+  </aside>
 
   <!-- 依赖顺序: js-yaml(parsers 的 clash 解析) → loader → bridge(暴露 window.yunting) → renderer -->
   <script src="lib/js-yaml.min.js"></script>

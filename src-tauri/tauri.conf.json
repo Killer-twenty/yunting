@@ -3,12 +3,13 @@
   "productName": "yunting",
   "mainBinaryName": "yunting",
   "version": "0.1.0",
-  "identifier": "com.yg.yunting",
+  "identifier": "com.twenty.yunting",
   "build": {
     "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,
+    "appDirectoriesOverride": "./data",
     "windows": [
       {
         "title": "yunting",
@@ -19,7 +20,8 @@
         "minHeight": 580,
         "resizable": true,
         "center": true,
-        "backgroundColor": "#14161a"
+        "devtools": false,
+        "backgroundColor": "#ffffff"
       }
     ],
     "security": {

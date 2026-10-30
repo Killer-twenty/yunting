@@ -1,9 +1,10 @@
 // 路径解析 —— 全部收敛到这一个文件（Rust 侧权威实现）
 // 数据目录策略(按优先级):
 // 1. YUNTING_DATA_DIR 环境变量 —— 显式覆盖(单测/便携自选目录)
-// 2. %APPDATA%\yunting —— 标准位置(与 Electron 版数据隔离, 避免双开冲突)
-// 3. exe 旁 data/      —— 仅当 %APPDATA% 不可写时兜底(便携场景)
+// 2. exe 旁 data/      —— 主位置(便携化: 所有写盘收束到 exe 同级，AppData 零产生)
+// 3. %APPDATA%\yunting —— 仅当 exe 旁不可写时兜底(如装进 Program Files 只读目录)
 // 内核目录: 打包态 exe 旁 kernel/; 开发态项目 kernel/
+// 注: WebView2 数据目录由 tauri.conf.json 的 app.appDirectoriesOverride="./data" 收束到 exe 旁 data/
 use std::path::{Path, PathBuf};
 
 pub fn exe_dir() -> PathBuf {
@@ -27,8 +28,8 @@ fn is_writable_dir(dir: &Path) -> bool {
 
 /// 解析数据目录（无缓存纯函数，测试直接测这个）
 /// 1. YUNTING_DATA_DIR 环境变量（显式覆盖）
-/// 2. %APPDATA%\yunting —— 必须真实可写才采用（受限会话/ACL 异常时 create_dir_all 会假成功）
-/// 3. exe 旁 data/
+/// 2. exe 旁 data/ —— 主位置，必须真实可写才采用（只读目录/ACL 异常时 create_dir_all 会假成功）
+/// 3. %APPDATA%\yunting —— 兜底（exe 装进只读位置时；受限会话下同样实测可写）
 pub fn resolve_data_dir() -> PathBuf {
     resolve_data_dir_with(
         std::env::var("YUNTING_DATA_DIR").ok(),
@@ -50,16 +51,20 @@ pub fn resolve_data_dir_with(
             return d;
         }
     }
+    // 主位置: exe 旁 data/（便携化收束所有写盘）
+    let side = exe_dir.join("data");
+    if std::fs::create_dir_all(&side).is_ok() && side.is_dir() && is_writable_dir(&side) {
+        return side;
+    }
+    // 兜底: %APPDATA%\yunting（exe 旁不可写才用；同样实测可写性）
     if let Some(ad) = appdata {
         let dir = Path::new(&ad).join("yunting");
         if std::fs::create_dir_all(&dir).is_ok() && dir.is_dir() && is_writable_dir(&dir) {
             return dir;
         }
     }
-    // 兜底: exe 旁 data/
-    let d = exe_dir.join("data");
-    let _ = std::fs::create_dir_all(&d);
-    d
+    // 两处都不可写: 仍返回 exe 旁 data/（让后续写入报错可见，而非静默写进异常位置）
+    side
 }
 
 pub fn data_dir() -> PathBuf {

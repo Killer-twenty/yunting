@@ -18,9 +18,8 @@ pub fn build_config(
     mode: &str,
     direct_list: &[String],
 ) -> Result<Value, String> {
-    if nodes.is_empty() {
-        return Err("profile.nodes 不能为空".into());
-    }
+    // nodes 允许为空：生成"纯直连"config（proxy 选择器只含 direct），
+    // 内核照常启动（mixed/api 端口可用），导入节点后重载即可走代理。
     let mut outbounds: Vec<Value> = Vec::new();
     let mut proxy_tags: Vec<String> = Vec::new();
     for node in nodes {
@@ -29,37 +28,51 @@ pub fn build_config(
             outbounds.push(ob);
         }
     }
-    if proxy_tags.is_empty() {
-        return Err("没有可用的出站节点".into());
-    }
+    let has_proxies = !proxy_tags.is_empty();
     let selected = match selected_tag {
         Some(t) if proxy_tags.contains(t) => t.clone(),
-        _ => proxy_tags[0].clone(),
+        _ => proxy_tags.first().cloned().unwrap_or_else(|| "direct".to_string()),
     };
 
-    let mut selector_outbounds: Vec<String> = vec!["auto".to_string()];
-    selector_outbounds.extend(proxy_tags.iter().cloned());
-    outbounds.push(json!({
-        "type": "selector",
-        "tag": "proxy",
-        "outbounds": selector_outbounds,
-        "default": selected,
-        "interrupt_exist_connections": false,
-    }));
-    outbounds.push(json!({
-        "type": "urltest",
-        "tag": "auto",
-        "outbounds": proxy_tags,
-        "url": "https://www.gstatic.com/generate_204",
-        "interval": "5m",
-        "tolerance": 50,
-        "idle_timeout": "30m",
-    }));
+    if has_proxies {
+        let mut selector_outbounds: Vec<String> = vec!["auto".to_string()];
+        selector_outbounds.extend(proxy_tags.iter().cloned());
+        outbounds.push(json!({
+            "type": "selector",
+            "tag": "proxy",
+            "outbounds": selector_outbounds,
+            "default": selected,
+            "interrupt_exist_connections": false,
+        }));
+        outbounds.push(json!({
+            "type": "urltest",
+            "tag": "auto",
+            "outbounds": proxy_tags,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": "5m",
+            "tolerance": 50,
+            "idle_timeout": "30m",
+        }));
+    } else {
+        // 无节点：proxy 选择器只含 direct，保持 route final 引用有效
+        outbounds.push(json!({
+            "type": "selector",
+            "tag": "proxy",
+            "outbounds": ["direct"],
+            "default": "direct",
+            "interrupt_exist_connections": false,
+        }));
+    }
     outbounds.push(json!({ "type": "direct", "tag": "direct" }));
     outbounds.push(json!({ "type": "block", "tag": "block" }));
 
     let config = json!({
-        "log": { "level": "info", "timestamp": true },
+        // sing-box info 级别会为【每一条连接】打日志（inbound/outbound connection...），
+        // 分发版必然刷屏 → 默认 warning；开发版保留 info 便于排障。
+        "log": {
+            "level": if cfg!(debug_assertions) { "info" } else { "warning" },
+            "timestamp": true
+        },
         "dns": build_dns(mode),
         "inbounds": [
             { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": mixed_port },
