@@ -76,6 +76,7 @@
     // ---------- 设置/事件 ----------
     getSettings: () => invoke('settings_get'),
     saveSettings: (s) => invoke('settings_save', { s }),
+    getLogTail: () => invoke('logs_tail'),
     onLog: (cb) => listen('log', (e) => cb(e.payload)),
     onState: (cb) => listen('state', (e) => cb(e.payload)),
 

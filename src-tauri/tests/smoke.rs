@@ -8,8 +8,65 @@ mod configbuilder;
 mod kernel;
 #[path = "../src/paths.rs"]
 mod paths;
+#[path = "../src/ports.rs"]
+mod ports;
 #[path = "../src/store.rs"]
 mod store;
+
+/// 端口冲突策略回归：固定端口、不自动顺延、报错可执行
+#[test]
+fn port_conflict_is_strict_and_actionable() {
+    use std::net::TcpListener;
+    let l = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+    let busy_port = l.local_addr().unwrap().port();
+    let free_port = {
+        // 拿一个确定空闲的端口（绑定后立刻释放）
+        let t = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let p = t.local_addr().unwrap().port();
+        drop(t);
+        p
+    };
+    assert_ne!(busy_port, free_port);
+
+    // 1) 两个端口都空闲 → 无冲突
+    let free_port2 = {
+        let t = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let p = t.local_addr().unwrap().port();
+        drop(t);
+        p
+    };
+    if free_port2 != free_port && free_port2 != busy_port {
+        assert!(
+            ports::port_conflict(free_port, free_port2).is_none(),
+            "two free ports must not conflict"
+        );
+    }
+
+    // 2) mixed 被占 → 报错，且文案给出端口号与"设置 → 端口"，绝不提"顺延/自动换端口"
+    let msg = ports::port_conflict(busy_port, free_port).expect("busy mixed port must conflict");
+    assert!(msg.contains(&busy_port.to_string()), "message must name the port: {msg}");
+    assert!(msg.contains("设置 → 端口"), "message must point to settings: {msg}");
+    assert!(
+        !msg.contains("顺延") && !msg.contains("已切换到"),
+        "must never auto-shift the port: {msg}"
+    );
+    println!("[t] 端口冲突文案: {msg}");
+
+    // 3) api 被占（mixed 空闲）→ 也能识别
+    let msg2 = ports::port_conflict(free_port, busy_port).expect("busy api port must conflict");
+    assert!(msg2.contains("API 端口"), "should mention api port: {msg2}");
+
+    // 4) 两端口相同 → 配置错误，先于占用检查报出
+    let same = ports::port_conflict(busy_port, busy_port).expect("same ports must conflict");
+    assert!(same.contains("不能相同"), "{same}");
+
+    // 5) 占用者识别（本进程自己的监听 socket）→ 至少能给出 PID 形式
+    let owner = ports::port_owner(busy_port);
+    println!("[t] port_owner({busy_port}) = {owner:?}");
+    assert!(owner.is_some(), "should identify the listening process");
+    drop(l);
+    println!("[t] 端口策略（固定端口 + 可执行报错）✅");
+}
 
 #[test]
 fn port_detection() {
@@ -254,7 +311,7 @@ async fn kernel_lifecycle() {
 
     let (km, kstatus) = kernel::KernelManager::new();
     let mut rx = km.take_log_rx();
-    let pid = km.start(&exe, &cfg_path, &dir).await.expect("start failed");
+    let pid = km.start(&exe, &cfg_path, &dir, Some(mixed_port), Some(api_port)).await.expect("start failed");
     println!("[t] kernel started pid={pid}");
     assert!(pid > 0);
     // 收日志（非阻塞采样）

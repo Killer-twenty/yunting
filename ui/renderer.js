@@ -32,13 +32,35 @@ function errText(e) {
   return String(e)
 }
 
+// 复制到剪贴板（WebView2 下 navigator.clipboard 偶尔不可用 → execCommand 兜底）
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch (e) {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;left:-9999px'
+      document.body.append(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      ta.remove()
+      return !!ok
+    } catch (e2) { return false }
+  }
+}
+
 // ---------- 日志（只保留记录功能：追加 + 自动跟随最新，无气泡/无位置记忆）----------
 // ANSI 色码剥离：sing-box 日志带 [36m 等转义序列，WebView 不解析会显示成乱码
 const ANSI_RE = /\x1b\[[0-9;]*m/g
+const logSeen = new Set() // 已上屏的行（补拉启动日志时去重，不重复刷屏）
 function log(line) {
   const box = $('logBox')
   const div = document.createElement('div')
-  div.textContent = line.replace(ANSI_RE, '')
+  const text = line.replace(ANSI_RE, '')
+  div.textContent = text
+  logSeen.add(text)
   box.appendChild(div)
   // 超量裁剪（保留最近 500 行）
   while (box.childNodes.length > 500) box.removeChild(box.firstChild)
@@ -491,22 +513,7 @@ function renderDrawer(n) {
   copyBtn.onclick = async (e) => {
     e.stopPropagation()
     if (copyBtn.classList.contains('busy') || copyBtn.classList.contains('done')) return
-    let ok = false
-    try {
-      await navigator.clipboard.writeText(link)
-      ok = true
-    } catch (err) {
-      // WebView2 剪贴板 API 不可用时回退 execCommand
-      try {
-        const ta = document.createElement('textarea')
-        ta.value = link
-        ta.style.cssText = 'position:fixed;left:-9999px'
-        document.body.append(ta)
-        ta.select()
-        ok = document.execCommand('copy')
-        ta.remove()
-      } catch (e2) { ok = false }
-    }
+    const ok = await copyToClipboard(link)
     if (!ok) { toast('复制失败', true); return }
     // 漩涡旋转 → 变对勾
     copyBtn.classList.add('busy')
@@ -652,6 +659,26 @@ function renderSubs(subs) {
 async function refreshSubs() { renderSubs(await api.getSubs()) }
 
 // ---------- 状态（连接栏 + 导航底部状态点 + 设置页）----------
+// 主页端口胶囊：始终显示"系统代理真正指向的地址"
+// 内核在跑 → 用内核实际监听端口（快照）；没跑 → 用设置里的端口（即将监听）
+function renderPortChip() {
+  const chip = $('vpnPortChip')
+  const val = $('vpnPortVal')
+  if (!chip || !val) return
+  const core = state.core || {}
+  const cfg = state.settings || {}
+  const running = !!core.running
+  const mixed = core.mixedPort || cfg.mixedPort || 7890
+  const api = core.apiPort || cfg.clashApiPort || 9090
+  const addr = `127.0.0.1:${mixed}`
+  chip.dataset.addr = addr
+  chip.title = running
+    ? `本地混合代理 ${addr}（HTTP + SOCKS5）\n控制端口 127.0.0.1:${api}\n点击复制地址`
+    : `内核未启动，启动后监听 ${addr}\n可在「设置 → 端口」修改\n点击复制地址`
+  val.textContent = addr
+  chip.classList.toggle('off', !running)
+}
+
 function renderState(s) {
   if (s && s.core) state.core = s.core
   if (s && s.proxy) state.proxy = s.proxy
@@ -682,6 +709,7 @@ function renderState(s) {
     }
   }
   renderTimer()
+  renderPortChip()
 }
 
 async function reloadCoreAfterNodeChange() {
@@ -775,6 +803,7 @@ async function loadSettings() {
   $('setCloseBehavior').value = state.settings.closeBehavior || 'quit'
   updateRouteModeHint()
   renderDirectList()
+  renderPortChip()
 }
 
 function updateRouteModeHint() {
@@ -862,6 +891,9 @@ async function saveSettings(extra = {}) {
   const clashApiPort = parseInt($('setApiPort').value, 10)
   if (!(mixedPort > 0 && mixedPort < 65536)) return toast('本地端口无效', true)
   if (!(clashApiPort > 0 && clashApiPort < 65536)) return toast('API 端口无效', true)
+  if (mixedPort === clashApiPort) return toast('本地端口与 API 端口不能相同', true)
+  const prev = state.settings || {}
+  const portChanged = prev.mixedPort !== mixedPort || prev.clashApiPort !== clashApiPort
   try {
     state.settings = await api.saveSettings({
       mixedPort, clashApiPort,
@@ -871,7 +903,30 @@ async function saveSettings(extra = {}) {
       ...extra,
     })
     renderDirectList()
-    toast('设置已保存（重连后生效）')
+    renderPortChip()
+    if (portChanged) {
+      const running = !!(state.core && state.core.running)
+      if (running) {
+        // 端口改了就立刻生效：重启内核（旧端口上的进程不放，新端口才会起来）
+        toast('端口已改，正在重启内核…')
+        log(`[gui] 端口改为 本地 ${mixedPort} / API ${clashApiPort}，重启内核使其生效`)
+        try {
+          await api.restart({ selectedTag: state.selectedTag })
+          toast('端口已切换')
+          log('[gui] 内核已按新端口重启')
+        } catch (e) {
+          const m = errText(e)
+          toast(m, true)
+          log(`[gui] 按新端口重启内核失败: ${m}`)
+        }
+        try { renderState(await api.getState()) } catch (e) { /* ignore */ }
+      } else {
+        toast('端口已保存')
+        log(`[gui] 端口改为 本地 ${mixedPort} / API ${clashApiPort}（下次启动内核生效）`)
+      }
+    } else {
+      toast('设置已保存（重连后生效）')
+    }
   } catch (e) {
     const m = errText(e)
     toast(m, true)
@@ -957,6 +1012,19 @@ $('chkSysProxy').onchange = async (e) => {
 
 $('btnClearLog').onclick = () => { $('logBox').innerHTML = '' }
 
+// 端口胶囊：点一下复制本地代理地址
+let portCopyTimer = null
+$('vpnPortChip').onclick = async () => {
+  const chip = $('vpnPortChip')
+  const addr = chip.dataset.addr
+  if (!addr) return
+  if (!(await copyToClipboard(addr))) return toast('复制失败', true)
+  chip.classList.add('copied')
+  clearTimeout(portCopyTimer)
+  portCopyTimer = setTimeout(() => chip.classList.remove('copied'), 1200)
+  toast(`已复制 ${addr}`)
+}
+
 $('setPort').onchange = () => saveSettings()
 $('setApiPort').onchange = () => saveSettings()
 $('chkAutoProxy').onchange = () => saveSettings()
@@ -1003,5 +1071,13 @@ $('dlgClose').addEventListener('cancel', (e) => {
     return
   }
   await loadSettings()
+  // 补拉启动阶段日志：自启动的内核预检/端口占用报错发生在 WebView 订阅之前，
+  // 只靠事件会整段丢失（面板空白）→ 先回放后端环形缓冲，再开始实时订阅
+  try {
+    const tail = await api.getLogTail()
+    if (Array.isArray(tail) && tail.length) {
+      tail.filter((t) => !logSeen.has(String(t).replace(ANSI_RE, ''))).forEach(log)
+    }
+  } catch (e) { log(`[gui] 启动日志补拉失败: ${errText(e)}`) }
   await Promise.all([refreshNodes(), refreshSubs(), renderState(await api.getState())])
 })()

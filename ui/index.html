@@ -140,6 +140,22 @@
     }
     .page-header h2 { font-size: 19px; font-weight: 700; }
     .page-header .sub { font-size: 12px; color: var(--fg-dim); }
+    /* 端口胶囊：常驻显示本地代理地址，点一下复制（CFW 的 Home 页同款信息位） */
+    .port-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 22px; padding: 0 9px; border-radius: 11px;
+      background: var(--bg3); border: 1px solid var(--border);
+      font-size: 11px; color: var(--fg-dim); cursor: pointer; user-select: none;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .port-chip:hover { border-color: var(--accent); color: var(--fg); background: var(--bg2); }
+    .port-chip .port-val {
+      font-family: ui-monospace, Consolas, "Courier New", monospace;
+      font-size: 11.5px; font-weight: 700; color: var(--fg); letter-spacing: .2px;
+    }
+    .port-chip.off .port-val { color: var(--fg-dim); font-weight: 600; }
+    .port-chip.copied { border-color: var(--ok); color: var(--ok); }
+    .port-chip.copied .port-val { color: var(--ok); }
     /* ============ 加速模式折叠下拉（左栏顶部，展开时把下方导航项往下推） ============ */
     /* 箭头不参与布局：绝对定位在内容组（列 18+8+65=91px）右侧空白处，保持不变 */
     .accel-group { --nav-group-w: 91px; display: flex; flex-direction: column; gap: 2px; }
@@ -165,11 +181,11 @@
       transform: translateY(0); opacity: 0; pointer-events: none; z-index: 0;
       transition: transform .18s cubic-bezier(.4, 0, .2, 1), opacity .14s;
     }
-    /* 折叠项：与主项同款两列网格（复用 --col-icon/--col-label，字号小一号），
-       图标/文字各自成列，整组居中 —— 列几何与主项一致保证跨行对齐 */
+    /* 折叠项：同样双列网格但宽度窄于主项（层次感：子项更收敛）。
+       图标列 16px、文字列 4.6em(约 55px)，字号小一号 —— 主项是 18px + 65px */
     .accel-opt {
       position: relative; z-index: 1;
-      display: grid; grid-template-columns: var(--col-icon) var(--col-label); justify-content: center;
+      display: grid; grid-template-columns: 16px 4.6em; justify-content: center;
       align-items: center; gap: 8px;
       height: 28px; padding: 0 10px;
       border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--fg);
@@ -177,7 +193,7 @@
     }
     .accel-opt.wip { color: var(--fg-dim); }
     .accel-opt.wip .icon { opacity: .55; }
-    .accel-opt .icon { font-size: 13px; width: var(--col-icon); text-align: center; flex-shrink: 0; justify-self: center; }
+    .accel-opt .icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; justify-self: center; }
     .accel-opt .name { text-align: justify; text-align-last: justify; flex-shrink: 0; }
     /* 选中高亮；但 wip（未实现）功能即使选中也保持灰色，只加粗 */
     .accel-opt.current .name { color: var(--accent); font-weight: 600; }
@@ -374,6 +390,10 @@
     .settings-row > .hint { grid-column: 3; }
     .settings-row input[type=text], .settings-row select { width: 130px; }
     .settings-row .hint { font-size: 11px; color: var(--fg-dim); }
+    /* 清空行：按钮贴第 1 列（与栏目名左对齐），提示紧跟按钮后落第 2 列（与输入框对齐） */
+    #directClearRow > .cell { grid-column: 1; }
+    #directClearRow > .hint { grid-column: 2; }
+    #directClearRow { margin-top: 0; padding-top: 7px; }
     /* ============ 日志面板 ============ */
     .log-wrap { flex: 1; display: flex; flex-direction: column; min-height: 160px; position: relative; background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: var(--shadow-sm); }
     .log-wrap h3 { font-size: 12px; color: var(--fg-dim); font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
@@ -481,6 +501,7 @@
       <div class="page-header">
         <span class="sub">国内直连，国外走代理</span>
         <span style="flex:1"></span>
+        <span class="port-chip" id="vpnPortChip"><span>本地端口</span><span class="port-val" id="vpnPortVal">127.0.0.1:7890</span></span>
         <span id="vpnNodeCount" class="sub"></span>
       </div>
       <div class="page-body">
@@ -561,9 +582,9 @@
               </span>
               <span class="hint">规则模式下优先级最高</span>
             </div>
-            <div id="directList" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 6px 98px"></div>
+            <div id="directList" style="display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 0 98px"></div>
+            <!-- 清空行：按钮落第 1 列（与栏目名左对齐），提示落第 2 列（与上方输入框对齐） -->
             <div class="settings-row" id="directClearRow" style="display:none">
-              <label></label>
               <span class="cell"><button id="btnDirectClear" class="btn-danger">一键清空</button></span>
               <span class="hint">清空全部自定义直连域名（可撤销）</span>
             </div>
@@ -574,12 +595,15 @@
           <div class="settings-row">
             <label>本地端口</label>
             <span class="cell"><input type="text" id="setPort" /></span>
-            <span class="hint">mixed 入站（默认 7890）</span>
+            <span class="hint">mixed 入站（默认 7890），被占用时启动会失败并提示</span>
           </div>
           <div class="settings-row">
             <label>API 端口</label>
             <span class="cell"><input type="text" id="setApiPort" /></span>
-            <span class="hint">clash api（默认 9090）</span>
+            <span class="hint">clash api（默认 9090），被占用时启动会失败并提示</span>
+          </div>
+          <div class="settings-row" id="portNoteRow">
+            <span class="hint" style="grid-column:1 / -1;line-height:1.65">端口固定使用上面的值，不会自动换端口（与 Clash for Windows 相同）。被其它程序占用时这里不会偷偷改端口，而是启动失败并在日志里说明是谁占着；关闭该程序或改成空闲端口后重启内核即可。</span>
           </div>
         </div>
         <div class="settings-card">
@@ -599,9 +623,9 @@
             <label>关闭行为</label>
             <span class="cell">
               <select id="setCloseBehavior" style="width:190px">
-                <option value="ask">点击 × 每次询问</option>
-                <option value="tray">点击 × 最小化到托盘</option>
-                <option value="quit">点击 × 直接退出</option>
+                <option value="ask">每次询问</option>
+                <option value="tray">最小化到托盘</option>
+                <option value="quit">直接退出</option>
               </select>
             </span>
             <span class="hint">托盘左键恢复窗口，右键菜单可退出</span>

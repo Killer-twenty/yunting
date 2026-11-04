@@ -11,6 +11,7 @@ mod clashapi;
 mod configbuilder;
 mod kernel;
 mod paths;
+mod ports;
 mod proxy_util;
 mod store;
 
@@ -56,10 +57,35 @@ fn now_hms() -> String {
     }
 }
 
+/// 日志环形缓冲（进程内，最多 300 行）。
+/// 自启动阶段（内核预检/端口被占）的日志往往早于 WebView 订阅事件，
+/// 只发事件会整段丢失 → 面板空白。前端加载后调 logs_tail 补拉，永不丢。
+fn log_ring() -> &'static std::sync::Mutex<std::collections::VecDeque<String>> {
+    static RING: std::sync::OnceLock<std::sync::Mutex<std::collections::VecDeque<String>>> =
+        std::sync::OnceLock::new();
+    RING.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()))
+}
+
 fn log_line(app: &AppHandle, line: impl AsRef<str>) {
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit("log", format!("[{}] {}", now_hms(), line.as_ref()));
+    let text = format!("[{}] {}", now_hms(), line.as_ref());
+    if let Ok(mut ring) = log_ring().lock() {
+        ring.push_back(text.clone());
+        while ring.len() > 300 {
+            ring.pop_front();
+        }
     }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.emit("log", text);
+    }
+}
+
+/// 补拉启动阶段日志（前端 init 时调用一次）
+#[tauri::command]
+fn logs_tail() -> Vec<String> {
+    log_ring()
+        .lock()
+        .map(|r| r.iter().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// 读取内核状态（无锁同步，任何上下文安全）
@@ -85,11 +111,18 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
-/// 端口是否被占用。
-/// SO_REUSEADDR 语义: Windows 上 TcpListener::bind 对 TIME_WAIT 连接通常能成功，
-/// 但对真正被 listen 的端口会失败 —— 正是我们要的判定。
-fn port_busy(port: u16) -> bool {
-    std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
+/// 端口预检：严格使用设置里的端口，**绝不自动顺延**（与 Clash for Windows 一致）。
+/// 冲突时给出可执行的错误文案（谁占的 + 去哪儿改），并写进日志面板，
+/// 避免出现「核心没起来但日志空白」的黑箱。
+fn ensure_ports_free(app: &AppHandle, mixed_port: u16, api_port: u16) -> Result<(), String> {
+    match ports::port_conflict(mixed_port, api_port) {
+        Some(e) => {
+            log_line(app, format!("[core] 启动中止：{e}"));
+            diag(&format!("[core] 端口预检失败（本地 {mixed_port} / API {api_port}）：{e}"));
+            Err(e)
+        }
+        None => Ok(()),
+    }
 }
 
 // ============================================================
@@ -322,8 +355,9 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
         let prev = core_snapshot(&app);
         if prev.running {
             // 自启动路径不联动系统代理；用户点「一键连接」时按设置补上
+            // 端口以内核实际监听的为准（正常等于设置值；内核还在跑时以快照为真相）
             if load_settings().auto_system_proxy {
-                let port = load_settings().mixed_port;
+                let port = prev.mixed_port.unwrap_or_else(|| load_settings().mixed_port);
                 match proxy_util::enable(&format!("127.0.0.1:{port}")) {
                     Ok(()) => log_line(&app, format!("系统代理已开启 → 127.0.0.1:{port}")),
                     Err(e) => log_line(&app, format!("[系统代理] 自动开启失败: {e}")),
@@ -342,6 +376,8 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
     } else {
         "rule"
     };
+    // 端口固定使用设置值，不做任何自动顺延（Clash for Windows 同款行为：
+    // 端口被占 = 启动失败 + 明确报错，由用户决定改端口，避免"端口偷偷换了"的诡异 state）
     let mixed_port = settings.mixed_port;
     let api_port = settings.clash_api_port;
 
@@ -357,17 +393,12 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
         }
     }
 
-    // 端口占用预检（区分"被自己占用"与"被其他程序占用"）
-    if port_busy(mixed_port) {
-        return Err(format!(
-            "端口 {mixed_port} 被占用（可能已有其他代理/内核在跑）。可在设置里换端口，或先关闭占用该端口的程序"
-        ));
-    }
-    if port_busy(api_port) {
-        return Err(format!(
-            "端口 {api_port}（clash api）被占用。可在设置里换端口，或先关闭占用该端口的程序"
-        ));
-    }
+    // 自愈之后再预检端口（顺序很重要：先清自己的残留，再判外部占用）
+    ensure_ports_free(&app, mixed_port, api_port)?;
+    log_line(
+        &app,
+        format!("[core] 端口就绪：本地 {mixed_port} / API {api_port}"),
+    );
 
     // Rust 侧生成 config（configbuilder.rs 纯函数）
     let cfg = configbuilder::build_config(
@@ -419,7 +450,7 @@ async fn core_connect(app: AppHandle, selected_tag: Option<String>) -> Result<Va
                 }
             }
         });
-        km.start(&exe, &cfg_path, &dir).await
+        km.start(&exe, &cfg_path, &dir, Some(mixed_port), Some(api_port)).await
     };
     if let Err(e) = start_res {
         log_line(&app, format!("[core] 内核启动失败: {e}"));
@@ -497,10 +528,11 @@ async fn start_kernel(app: &AppHandle) -> Result<(), String> {
     } else {
         "rule"
     };
+    // 端口固定用设置值（同 core_connect，不自动顺延）
     let mixed_port = settings.mixed_port;
     let api_port = settings.clash_api_port;
 
-    // 自启动路径同样做残留自愈
+    // 自启动路径同样做残留自愈（先清自己的残留，再判外部占用）
     {
         let prev = core_snapshot(app);
         if prev.running || prev.pid.unwrap_or(0) > 0 {
@@ -509,16 +541,12 @@ async fn start_kernel(app: &AppHandle) -> Result<(), String> {
             let _ = km.stop().await;
         }
     }
-    if port_busy(mixed_port) {
-        return Err(format!(
-            "端口 {mixed_port} 被占用（可能已有其他代理/内核在跑），内核暂不启动；可在设置里换端口后点「一键连接」重试"
-        ));
-    }
-    if port_busy(api_port) {
-        return Err(format!(
-            "端口 {api_port}（clash api）被占用，内核暂不启动；可在设置里换端口后点「一键连接」重试"
-        ));
-    }
+
+    ensure_ports_free(app, mixed_port, api_port)?;
+    log_line(
+        app,
+        format!("[core] 端口就绪：本地 {mixed_port} / API {api_port}"),
+    );
 
     let cfg = configbuilder::build_config(
         &nodes,
@@ -558,7 +586,7 @@ async fn start_kernel(app: &AppHandle) -> Result<(), String> {
                 }
             }
         });
-        km.start(&exe, &cfg_path, &dir).await
+        km.start(&exe, &cfg_path, &dir, Some(mixed_port), Some(api_port)).await
     };
     if let Err(e) = start_res {
         log_line(app, format!("[core] 内核启动失败: {e}"));
@@ -617,8 +645,13 @@ async fn autostart_kernel(app: AppHandle) {
         Ok(()) => {
             log_line(&app, "[core] 内核已随软件自启动，点「一键连接」开启系统代理");
         }
-        Err(e) => {
-            log_line(&app, format!("[core] 内核自启动跳过: {e}（导入节点或调整端口后点「一键连接」即可）"));
+        Err(_) => {
+            // 具体原因（端口被占等）已由底层写过一行醒目日志，这里只补一条可操作提示，
+            // 不整段重复，避免同样的长句刷两遍
+            log_line(
+                &app,
+                "[core] 内核未自启动：按上面那行的提示处理后，点「一键连接」重试",
+            );
         }
     }
 }
@@ -662,7 +695,10 @@ fn core_state(app: AppHandle) -> Value {
 
 #[tauri::command]
 async fn core_delay(app: AppHandle, tag: String) -> Result<Option<u32>, String> {
-    let api_port = load_settings().clash_api_port;
+    // 用内核实际监听的 api 端口（内核在跑就以快照为真相，避免用户刚改设置导致探测落空）
+    let api_port = core_snapshot(&app)
+        .api_port
+        .unwrap_or_else(|| load_settings().clash_api_port);
     let d = match clashapi::test_delay(&tag, api_port).await {
         Ok(delay) => delay,
         Err(e) => {
@@ -691,11 +727,13 @@ async fn core_delay(app: AppHandle, tag: String) -> Result<Option<u32>, String> 
 // ============================================================
 #[tauri::command]
 fn sysproxy_set(app: AppHandle, on: bool) -> Result<Value, String> {
-    let port = load_settings().mixed_port;
+    // 优先用内核实际监听端口，内核没跑则回退设置值（两者正常情况下一致）
+    let snap = core_snapshot(&app);
+    let port = snap.mixed_port.unwrap_or_else(|| load_settings().mixed_port);
 
     if on {
         // 内核未运行时提示（手动开系统代理会指向死端口），但尊重用户选择不拦截
-        if !core_snapshot(&app).running {
+        if !snap.running {
             log_line(&app, "提示: 内核未运行，系统代理将指向未监听的端口");
         }
         proxy_util::enable(&format!("127.0.0.1:{port}"))?;
@@ -723,7 +761,7 @@ fn settings_get() -> Settings {
 }
 
 #[tauri::command]
-fn settings_save(s: Settings) -> Result<Settings, String> {
+fn settings_save(app: AppHandle, s: Settings) -> Result<Settings, String> {
     if !["rule", "global"].contains(&s.route_mode.as_str()) {
         return Err(format!("未知分流模式: {}", s.route_mode));
     }
@@ -736,7 +774,27 @@ fn settings_save(s: Settings) -> Result<Settings, String> {
     if s.mixed_port == s.clash_api_port {
         return Err("本地端口与 API 端口不能相同".into());
     }
+    // 保存时只提示不拦截：端口占用是运行期问题，用户可能正要关掉占用者
+    if ports::port_busy(s.mixed_port) {
+        let o = ports::port_owner(s.mixed_port)
+            .map(|x| format!("（占用者：{x}）"))
+            .unwrap_or_default();
+        log_line(
+            &app,
+            format!("[core] 提示：本地端口 {} 当前被占用{o}，重连前请先释放", s.mixed_port),
+        );
+    }
+    if ports::port_busy(s.clash_api_port) {
+        let o = ports::port_owner(s.clash_api_port)
+            .map(|x| format!("（占用者：{x}）"))
+            .unwrap_or_default();
+        log_line(
+            &app,
+            format!("[core] 提示：API 端口 {} 当前被占用{o}，重连前请先释放", s.clash_api_port),
+        );
+    }
     store::save_settings(&s)?;
+    broadcast_state(&app);
     Ok(s)
 }
 
@@ -962,6 +1020,7 @@ pub fn run() {
             settings_save,
             diag_paths,
             fetch_text,
+            logs_tail,
             app_quit,
             window_show,
             window_hide,

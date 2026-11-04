@@ -1,7 +1,7 @@
 [package]
 name = "yunting"
 default-run = "yunting"
-version = "0.2.1"
+version = "0.2.2"
 description = "yunting - Windows 桌面代理加速器 (Tauri 2.x + sing-box)"
 authors = ["YG"]
 edition = "2021"

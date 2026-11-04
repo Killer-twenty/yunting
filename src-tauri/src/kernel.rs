@@ -24,6 +24,10 @@ pub struct KernelSnapshot {
     pub pid: Option<u32>,
     pub exit_code: Option<i32>,
     pub phase: String,
+    /// 内核实际监听的 mixed 端口（可能因占用顺延，与设置值不同）
+    pub mixed_port: Option<u16>,
+    /// 内核实际监听的 clash api 端口（同上，顺延时与设置值不同）
+    pub api_port: Option<u16>,
 }
 
 /// 内核运行时状态（内部全是原子量 / std Mutex，任何线程都可同步读取）
@@ -31,6 +35,8 @@ pub struct KernelStatus {
     running: AtomicBool,
     pid: Mutex<Option<u32>>,
     exit_code: Mutex<Option<i32>>,
+    mixed_port: Mutex<Option<u16>>,
+    api_port: Mutex<Option<u16>>,
 }
 
 impl KernelStatus {
@@ -39,6 +45,8 @@ impl KernelStatus {
             running: AtomicBool::new(false),
             pid: Mutex::new(None),
             exit_code: Mutex::new(None),
+            mixed_port: Mutex::new(None),
+            api_port: Mutex::new(None),
         }
     }
 
@@ -53,12 +61,26 @@ impl KernelStatus {
             } else {
                 "stopped".into()
             },
+            mixed_port: *self.mixed_port.lock().unwrap_or_else(|e| e.into_inner()),
+            api_port: *self.api_port.lock().unwrap_or_else(|e| e.into_inner()),
         }
     }
 
     fn set_running(&self, running: bool, pid: Option<u32>) {
         self.running.store(running, Ordering::SeqCst);
         *self.pid.lock().unwrap_or_else(|e| e.into_inner()) = pid;
+        if !running {
+            *self.mixed_port.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *self.api_port.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+
+    fn set_mixed_port(&self, port: Option<u16>) {
+        *self.mixed_port.lock().unwrap_or_else(|e| e.into_inner()) = port;
+    }
+
+    fn set_api_port(&self, port: Option<u16>) {
+        *self.api_port.lock().unwrap_or_else(|e| e.into_inner()) = port;
     }
 
     fn set_exit_code(&self, code: Option<i32>) {
@@ -105,7 +127,15 @@ impl KernelManager {
     }
 
     /// 启动内核。日志走通道；状态本函数返回即视为 running（就绪等待由调用方做）。
-    pub async fn start(&self, exe: &Path, cfg: &Path, work_dir: &Path) -> Result<u32, String> {
+    /// mixed_port/api_port: 本次启动实际使用的端口（供状态快照/系统代理/延迟测试对齐）
+    pub async fn start(
+        &self,
+        exe: &Path,
+        cfg: &Path,
+        work_dir: &Path,
+        mixed_port: Option<u16>,
+        api_port: Option<u16>,
+    ) -> Result<u32, String> {
         {
             let g = self.child.lock().unwrap_or_else(|e| e.into_inner());
             if g.is_some() {
@@ -176,6 +206,8 @@ impl KernelManager {
         }
 
         self.status.set_exit_code(None);
+        self.status.set_mixed_port(mixed_port);
+        self.status.set_api_port(api_port);
         self.status.set_running(true, Some(pid));
         *self.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
         Ok(pid)
